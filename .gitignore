@@ -1,0 +1,10 @@
+node_modules/
+dist/
+dev-dist/
+.env.local
+.env.*.local
+supabase/.temp/
+supabase/.branches/
+
+# Задания и план — только локально, в публичный репозиторий не выкладываем
+задания/
