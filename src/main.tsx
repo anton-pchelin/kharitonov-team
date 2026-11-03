@@ -1,6 +1,5 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
-import { App } from './App'
 import { applyTheme } from './theme'
 import { loadLocalTheme } from './screens/Settings'
 import './styles.css'
@@ -9,8 +8,9 @@ import './styles.css'
 const t = loadLocalTheme()
 applyTheme(t.palette, t.mode)
 
-createRoot(document.getElementById('root')!).render(
-  <StrictMode>
-    <App />
-  </StrictMode>,
+const root = createRoot(document.getElementById('root')!)
+// App тянет за собой клиент Supabase; без настроек показываем понятный текст, а не пустую страницу.
+import('./App').then(
+  ({ App }) => root.render(<StrictMode><App /></StrictMode>),
+  (e) => root.render(<p className="center">Сайт открылся, но база не подключена: {String(e.message)}</p>),
 )
