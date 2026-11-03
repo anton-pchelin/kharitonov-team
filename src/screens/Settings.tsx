@@ -1,22 +1,8 @@
 import { supabase, type Profile } from '../supabase'
-import { DEFAULT_PALETTE, PALETTES, type ThemeMode } from '../theme'
+import { PALETTES, saveLocalTheme, type ThemeMode } from '../theme'
 import { InstallHint } from './InstallHint'
 
-const KEY = 'theme'
 const MODES: [ThemeMode, string][] = [['light', 'Светлая'], ['dark', 'Тёмная'], ['system', 'Как в телефоне']]
-
-/** Копия выбора в телефоне — чтобы до входа и загрузки профиля не мигали чужие цвета. */
-export function loadLocalTheme(): { palette: string; mode: ThemeMode } {
-  try {
-    const t = JSON.parse(localStorage.getItem(KEY) ?? '')
-    if (t.palette in PALETTES && MODES.some(([m]) => m === t.mode)) return t
-  } catch { /* нет сохранённой — по умолчанию */ }
-  return { palette: DEFAULT_PALETTE, mode: 'light' }
-}
-
-export function saveLocalTheme(palette: string, mode: ThemeMode) {
-  localStorage.setItem(KEY, JSON.stringify({ palette, mode }))
-}
 
 export function Settings({ profile, onChange }: { profile: Profile; onChange: (p: Partial<Profile>) => Promise<void> }) {
   const set = (patch: { palette?: string; theme?: ThemeMode }) => {

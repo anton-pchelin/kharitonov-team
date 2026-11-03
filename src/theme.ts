@@ -74,3 +74,18 @@ export function watchSystemTheme(onChange: () => void) {
   q.addEventListener('change', onChange)
   return () => q.removeEventListener('change', onChange)
 }
+
+const KEY = 'theme'
+
+/** Копия выбора в телефоне — чтобы до входа и загрузки профиля не мигали чужие цвета. */
+export function loadLocalTheme(): { palette: string; mode: ThemeMode } {
+  try {
+    const t = JSON.parse(localStorage.getItem(KEY) ?? '')
+    if (t.palette in PALETTES && ['light', 'dark', 'system'].includes(t.mode)) return t
+  } catch { /* нет сохранённой — по умолчанию */ }
+  return { palette: DEFAULT_PALETTE, mode: 'light' }
+}
+
+export function saveLocalTheme(palette: string, mode: ThemeMode) {
+  localStorage.setItem(KEY, JSON.stringify({ palette, mode }))
+}

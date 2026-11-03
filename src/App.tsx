@@ -1,13 +1,13 @@
 import { useEffect, useState } from 'react'
 import type { Session } from '@supabase/supabase-js'
 import { supabase, type Profile } from './supabase'
-import { applyTheme, watchSystemTheme } from './theme'
+import { applyTheme, saveLocalTheme, watchSystemTheme } from './theme'
 import { Login } from './screens/Login'
 import { Athletes } from './screens/Athletes'
 import { AthleteCard } from './screens/AthleteCard'
 import { Exercises } from './screens/Exercises'
 import { MyProfile } from './screens/MyProfile'
-import { Settings, saveLocalTheme } from './screens/Settings'
+import { Settings } from './screens/Settings'
 
 const INVITE_KEY = 'inviteToken'
 

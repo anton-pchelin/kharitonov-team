@@ -1,7 +1,6 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
-import { applyTheme } from './theme'
-import { loadLocalTheme } from './screens/Settings'
+import { applyTheme, loadLocalTheme } from './theme'
 import './styles.css'
 
 // Тема до первой отрисовки — без вспышки чужих цветов.
