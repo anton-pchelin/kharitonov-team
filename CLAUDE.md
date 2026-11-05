@@ -17,6 +17,7 @@
 | `supabase/migrations/` | Схема базы и правила доступа (RLS). Новый этап — новый файл миграции, старые не править |
 | `supabase/seed.sql` | 876 упражнений; **генерируется** `npm run exercises`, руками не править |
 | `data/exercises-ru.txt` | Русские названия упражнений, строка `English | Русское` — править здесь |
+| `scripts/check-rls.sql` | Проверка правил доступа запросами под тренером и атлетами |
 | `scripts/build-exercises.mjs` | Скачивает free-exercise-db и собирает `seed.sql`; там же словари мышц и оборудования |
 | `public/icons/` | Иконки приложения (жёлтый квадрат «KT») |
 | `.github/workflows/deploy.yml` | Сборка, тесты и выкладка на GitHub Pages |
@@ -54,7 +55,8 @@ npm run build                # проверка типов + сборка в dis
 ## Как выкладывать
 
 - Сайт: push в `main` или `task-trekker-*` → GitHub Actions собирает и выкладывает на GitHub Pages. После смены Variables нужен новый коммит: повторная выкладка того же коммита сайт не обновляет.
-- База: `npx supabase login` (один раз), `npx supabase link --project-ref <ref>`, затем `npx supabase db push` (новые миграции) и при первой загрузке упражнений `npx supabase db push --include-seed`.
+- База: `npx supabase login` (один раз), `npx supabase link --project-ref <ref>`, затем `npx supabase db push --remote --yes` (новые миграции; `--include-seed` — при первой загрузке упражнений). В PowerShell на этом компьютере `npx` запрещён настройками Windows — писать `npx.cmd`.
+- Проверка правил доступа: `npx supabase db query --remote --yes -f scripts/check-rls.sql`. Успех — ошибка с текстом `RLS_OK`, тестовые данные откатываются. Новые таблицы с доступом — дописывать туда.
 - Новые русские названия: поправить `data/exercises-ru.txt` → `npm run exercises`. Уже загруженные упражнения seed не перезаписывает — правку в базе делать в приложении или SQL.
 
 ## Правила
