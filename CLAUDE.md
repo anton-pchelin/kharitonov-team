@@ -46,7 +46,7 @@ npm run build                # проверка типов + сборка в dis
 - `.env.local` (не в git): `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`. Для выкладки те же два значения — в GitHub: Settings → Secrets and variables → Actions → **Variables**.
 - Supabase, панель проекта:
   - Authentication → Sign In / Providers → Email: включён, «Confirm email» включён; длина кода 6.
-  - Authentication → Emails → Templates → **Magic Link**: в письме должен быть код `{{ .Token }}` (вход по коду, не по ссылке).
+  - Authentication → Emails → Templates → **Magic Link** и **Confirm signup** (новому человеку приходит второй): в письме должен быть код `{{ .Token }}` (вход по коду, не по ссылке).
   - Authentication → Emails → SMTP Settings: бесплатный почтовый сервис (Resend / Brevo / Яндекс), не встроенная почта.
   - Authentication → URL Configuration → Site URL: адрес сайта на GitHub Pages.
   - Email тренера: SQL Editor → `insert into coach_emails values ('адрес');` — **до** первого входа тренера.
