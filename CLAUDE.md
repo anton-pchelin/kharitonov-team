@@ -53,7 +53,7 @@ npm run build                # проверка типов + сборка в dis
 
 ## Как выкладывать
 
-- Сайт: push в `main` или `task-trekker-*` → GitHub Actions собирает и выкладывает на GitHub Pages.
+- Сайт: push в `main` или `task-trekker-*` → GitHub Actions собирает и выкладывает на GitHub Pages. После смены Variables нужен новый коммит: повторная выкладка того же коммита сайт не обновляет.
 - База: `npx supabase login` (один раз), `npx supabase link --project-ref <ref>`, затем `npx supabase db push` (новые миграции) и при первой загрузке упражнений `npx supabase db push --include-seed`.
 - Новые русские названия: поправить `data/exercises-ru.txt` → `npm run exercises`. Уже загруженные упражнения seed не перезаписывает — правку в базе делать в приложении или SQL.
 
