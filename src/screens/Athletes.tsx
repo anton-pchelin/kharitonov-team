@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../supabase'
 import { addDays, today } from '../lib/dates'
+import { loadGroups } from './WeekTools'
 
 type Row = { athlete_id: string; profiles: { name: string; email: string | null; city: string } | null }
 
@@ -71,6 +72,59 @@ export function Athletes() {
           <span className="muted">{[pct[r.athlete_id], r.profiles?.city].filter(Boolean).join(' · ')}</span>
         </a>
       ))}
+      {rows && rows.length > 0 && <Groups athletes={rows.map((r) => ({ id: r.athlete_id, name: r.profiles?.name || 'Без имени' }))} />}
+    </>
+  )
+}
+
+/** Группы атлетов: тренировка или программа группе = копия каждому. Удаление из группы не трогает назначенное. */
+function Groups({ athletes }: { athletes: { id: string; name: string }[] }) {
+  const [groups, setGroups] = useState<Awaited<ReturnType<typeof loadGroups>>>([])
+  const [name, setName] = useState('')
+  const [open, setOpen] = useState<string | null>(null)
+  const load = () => { loadGroups().then(setGroups) }
+  useEffect(load, [])
+
+  const toggle = async (groupId: string, athleteId: string, on: boolean) => {
+    const { error } = on
+      ? await supabase.from('group_members').insert({ group_id: groupId, athlete_id: athleteId })
+      : await supabase.from('group_members').delete().eq('group_id', groupId).eq('athlete_id', athleteId)
+    if (error) alert('Не получилось: ' + error.message)
+    load()
+  }
+  return (
+    <>
+      <h2>Группы</h2>
+      {groups.map((g) => (
+        <div key={g.id} className="card">
+          <button className="row-between link-row" onClick={() => setOpen(open === g.id ? null : g.id)}>
+            <b>{g.name}</b><span className="muted">{g.members.length} атл. {open === g.id ? '▲' : '▼'}</span>
+          </button>
+          {open === g.id && (
+            <>
+              {athletes.map((a) => (
+                <label key={a.id} className="switch">
+                  <input type="checkbox" checked={g.members.includes(a.id)} onChange={(e) => toggle(g.id, a.id, e.target.checked)} />
+                  <span>{a.name}</span>
+                </label>
+              ))}
+              <button className="link-btn" onClick={async () => {
+                if (confirm(`Удалить группу «${g.name}»? Назначенные тренировки останутся.`)) { await supabase.from('athlete_groups').delete().eq('id', g.id); load() }
+              }}>Удалить группу</button>
+            </>
+          )}
+        </div>
+      ))}
+      <form className="row" onSubmit={async (e) => {
+        e.preventDefault()
+        const { error } = await supabase.from('athlete_groups').insert({ name: name.trim() })
+        if (error) return alert('Не получилось: ' + error.message)
+        setName('')
+        load()
+      }}>
+        <input placeholder="Новая группа" value={name} onChange={(e) => setName(e.target.value)} required />
+        <button className="btn small">Создать</button>
+      </form>
     </>
   )
 }

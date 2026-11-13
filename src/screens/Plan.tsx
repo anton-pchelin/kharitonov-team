@@ -1,8 +1,11 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import { supabase } from '../supabase'
 import type { Exercise } from '../search'
 import { loadExercises } from './Exercises'
-import { WorkoutEditor } from './WorkoutEditor'
+import { WorkoutEditor, snapshot } from './WorkoutEditor'
+import { AssignProgram, CopyWeek } from './WeekTools'
+import { DndContext, PointerSensor, useDraggable, useDroppable, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core'
+import type { WorkoutItem } from '../lib/workout'
 import { addDays, dayShort, fmtShort, mondayOf, today, weekDays } from '../lib/dates'
 import type { Workout } from '../lib/workout'
 import type { Comment, SetResult } from '../lib/offline'
@@ -22,7 +25,10 @@ export function Plan({ athleteId, week, open, me }: { athleteId?: string; week?:
   const [athletes, setAthletes] = useState<Athlete[] | null>(null)
   const [exercises, setExercises] = useState<Exercise[]>([])
   const [workouts, setWorkouts] = useState<Workout[]>([])
-  const [editing, setEditing] = useState<{ date: string; workout: Workout | null } | null>(null)
+  const [editing, setEditing] = useState<{ date: string; workout: Workout | null; template?: Template } | null>(null)
+  const [adding, setAdding] = useState<string | null>(null)  // день, где открыт выбор «пустая / из шаблона»
+  const [tool, setTool] = useState<'copy' | 'assign' | null>(null)
+  const [templates, setTemplates] = useState<Template[]>([])
   const [viewing, setViewing] = useState<string | null>(open ?? null)
   const [results, setResults] = useState<SetResult[]>([])
   const [comments, setComments] = useState<Comment[]>([])
@@ -31,7 +37,20 @@ export function Plan({ athleteId, week, open, me }: { athleteId?: string; week?:
   useEffect(() => {
     loadMyAthletes().then(setAthletes)
     loadExercises().then(setExercises, () => setExercises([]))
+    loadTemplates()
   }, [])
+  const loadTemplates = () => supabase.from('workout_templates').select('*').order('title').then(({ data }) => setTemplates((data ?? []) as Template[]))
+
+  // перетаскивание карточки тренировки на другой день
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }))
+  const onDragEnd = async ({ active, over }: DragEndEvent) => {
+    const w = workouts.find((x) => x.id === active.id)
+    if (!w || !over || over.id === w.date) return
+    setWorkouts((l) => l.map((x) => (x.id === w.id ? { ...x, date: String(over.id) } : x)))
+    const { error } = await supabase.from('workouts').update({ date: over.id }).eq('id', w.id)
+    if (error) alert('Не перенеслось: ' + error.message)
+    reload()
+  }
 
   const athlete = athletes?.find((a) => a.id === athleteId) ?? athletes?.[0]
   const go = (id: string, mon: string) => { location.hash = `#/plan/${id}/${mon}` }
@@ -53,7 +72,7 @@ export function Plan({ athleteId, week, open, me }: { athleteId?: string; week?:
   }, [athlete?.id, monday])
 
   useEffect(() => { reload() }, [reload])
-  useEffect(() => { setEditing(null); setViewing(open ?? null) }, [athlete?.id, monday, open])
+  useEffect(() => { setEditing(null); setViewing(open ?? null); setTool(null) }, [athlete?.id, monday, open])
 
   if (athletes === null) return <p className="muted">Загрузка…</p>
   if (!athlete) return <p className="muted">Пока нет атлетов. Пригласите кого-нибудь во вкладке «Атлеты».</p>
@@ -71,24 +90,42 @@ export function Plan({ athleteId, week, open, me }: { athleteId?: string; week?:
         </div>
         <RemindNow />
       </div>
-
-      <div className="week">
-        {weekDays(monday).map((d) => {
-          const day = workouts.filter((w) => w.date === d)
-          return (
-            <div key={d} className={'day' + (d === today() ? ' is-today' : '')}>
-              <div className="day-head">{dayShort(d)} <span className="muted">{fmtShort(d)}</span></div>
-              {day.map((w) => (
-                <WorkoutCard key={w.id} w={w} athletes={athletes} results={results}
-                  onOpen={() => { setViewing(null); setEditing({ date: d, workout: w }) }}
-                  onResults={() => { setEditing(null); setViewing(w.id) }} onChanged={reload} />
-              ))}
-              {day.length === 0 && <span className="muted rest">отдых</span>}
-              <button className="add-day" onClick={() => setEditing({ date: d, workout: null })} aria-label={`Добавить тренировку ${d}`}>+</button>
-            </div>
-          )
-        })}
+      <div className="plan-tools">
+        <button className="btn small secondary" onClick={() => setTool(tool === 'copy' ? null : 'copy')}>Копировать неделю</button>
+        <button className="btn small secondary" onClick={() => setTool(tool === 'assign' ? null : 'assign')}>Назначить программу</button>
+        <a className="btn small secondary" href="#/programs">Шаблоны и программы</a>
       </div>
+      {tool === 'copy' && <CopyWeek athlete={athlete} monday={monday} athletes={athletes} onDone={() => { setTool(null); reload() }} />}
+      {tool === 'assign' && <AssignProgram athlete={athlete} monday={monday} athletes={athletes} onDone={() => { setTool(null); reload() }} />}
+
+      <DndContext sensors={sensors} onDragEnd={onDragEnd}>
+        <div className="week">
+          {weekDays(monday).map((d) => {
+            const day = workouts.filter((w) => w.date === d)
+            const open = (template?: Template) => { setAdding(null); setViewing(null); setEditing({ date: d, workout: null, template }) }
+            return (
+              <Day key={d} date={d}>
+                <div className="day-head">{dayShort(d)} <span className="muted">{fmtShort(d)}</span></div>
+                {day.map((w) => (
+                  <WorkoutCard key={w.id} w={w} athletes={athletes} results={results}
+                    onOpen={() => { setViewing(null); setEditing({ date: d, workout: w }) }}
+                    onResults={() => { setEditing(null); setViewing(w.id) }} onChanged={() => { reload(); loadTemplates() }} />
+                ))}
+                {day.length === 0 && <span className="muted rest">отдых</span>}
+                {adding === d ? (
+                  <div className="suggest">
+                    <button onClick={() => open()}>Пустая тренировка</button>
+                    {templates.map((t) => <button key={t.id} onClick={() => open(t)}>Из шаблона: {t.title || 'Тренировка'}</button>)}
+                    <button onClick={() => setAdding(null)}>Отмена</button>
+                  </div>
+                ) : (
+                  <button className="add-day" onClick={() => (templates.length ? setAdding(d) : open())} aria-label={`Добавить тренировку ${d}`}>+</button>
+                )}
+              </Day>
+            )
+          })}
+        </div>
+      </DndContext>
 
       {viewing && workouts.some((w) => w.id === viewing) && (
         <section className="editor card">
@@ -105,12 +142,19 @@ export function Plan({ athleteId, week, open, me }: { athleteId?: string; week?:
 
       {editing && (
         <WorkoutEditor key={(editing.workout?.id ?? 'new') + editing.date}
-          athleteId={athlete.id} athleteName={athlete.name} date={editing.date} workout={editing.workout}
+          athleteId={athlete.id} athleteName={athlete.name} date={editing.date} workout={editing.workout} template={editing.template}
           exercises={exercises} onClose={() => setEditing(null)}
           onSaved={() => { setEditing(null); reload() }} />
       )}
     </>
   )
+}
+
+type Template = { id: string; title: string; prescription: string; items: WorkoutItem[] }
+
+function Day({ date, children }: { date: string; children: ReactNode }) {
+  const { setNodeRef, isOver } = useDroppable({ id: date })
+  return <div ref={setNodeRef} className={'day' + (date === today() ? ' is-today' : '') + (isOver ? ' drop' : '')}>{children}</div>
 }
 
 /** Проверка напоминаний: сразу шлёт атлетам тренера сообщения о завтрашних тренировках. */
@@ -137,7 +181,8 @@ function WorkoutCard({ w, athletes, results, onOpen, onResults, onChanged }: {
   const [date, setDate] = useState(addDays(w.date, 7))
   const items = (w.workout_items ?? []).sort((a, b) => a.position - b.position)
   const mine = results.filter((r) => items.some((i) => i.id === r.item_id))
-  const p = progress(items, mine)
+  const p = progress(items.filter((i) => !i.self), mine)  // «4/4» — по плану тренера, свои упражнения атлета не в счёт
+  const drag = useDraggable({ id: w.id, disabled: w.self })
 
   const run = async (p: PromiseLike<{ error: { message: string } | null }>) => {
     const { error } = await p
@@ -151,7 +196,9 @@ function WorkoutCard({ w, athletes, results, onOpen, onResults, onChanged }: {
   }
 
   return (
-    <div className={'wcard' + (w.published ? '' : ' draft')}>
+    <div ref={drag.setNodeRef} className={'wcard' + (w.published ? '' : ' draft') + (drag.isDragging ? ' dragging' : '')}
+      style={drag.transform ? { transform: `translate(${drag.transform.x}px, ${drag.transform.y}px)`, zIndex: 10 } : undefined}>
+      {!w.self && <button className="drag-handle" {...drag.listeners} {...drag.attributes} aria-label="Перетащить на другой день">⠿</button>}
       <button className="wcard-open" onClick={w.self || w.completed_at ? onResults : onOpen}>
         <b>{w.title || 'Тренировка'}</b>
         {w.self && <span className="tag">сам</span>}
@@ -166,6 +213,11 @@ function WorkoutCard({ w, athletes, results, onOpen, onResults, onChanged }: {
           <div className="menu-list">
             <button onClick={onOpen}>Редактировать</button>
             <button onClick={onResults}>Результаты и комментарии</button>
+            <button onClick={async () => {
+              const { error } = await supabase.from('workout_templates').insert({ title: w.title, prescription: w.prescription, items: snapshot(items) })
+              alert(error ? 'Не сохранилось: ' + error.message : `«${w.title || 'Тренировка'}» сохранена как шаблон`)
+              onChanged()
+            }}>Сохранить как шаблон</button>
             <button onClick={() => run(supabase.from('workouts').update({ published: !w.published }).eq('id', w.id))}>
               {w.published ? 'Снять с публикации' : 'Опубликовать'}
             </button>

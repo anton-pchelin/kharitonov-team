@@ -81,3 +81,18 @@ export function weeklyStats(sets: (PastSet & { workout_id?: string })[]): Week[]
   }
   return [...map.keys()].sort().map((monday) => ({ monday, workouts: map.get(monday)!.workouts.size, tonnage: Math.round(map.get(monday)!.tonnage) }))
 }
+
+export type MaxRecord = { exercise_id: string | null; name: string; weight: number | null; reps: number | null }
+
+/** Максимум атлета в упражнении: лучший расчётный 1ПМ из истории и рекордов вручную. */
+export function maxFor(item: { exercise_id: string | null; name: string }, history: PastSet[], manual: MaxRecord[]): number | null {
+  const key = exerciseKey(item)
+  const vals = [
+    ...history.filter((h) => exerciseKey(h) === key && h.weight && h.reps).map((h) => epley(Number(h.weight), h.reps!)),
+    ...manual.filter((r) => exerciseKey(r) === key && r.weight).map((r) => epley(Number(r.weight), r.reps ?? 1)),
+  ]
+  return vals.length ? Math.max(...vals) : null
+}
+
+/** Вес от % максимума, округление до 2,5 кг. */
+export const pctWeight = (pct: number, max: number) => Math.round((max * pct) / 100 / 2.5) * 2.5

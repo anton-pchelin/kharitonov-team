@@ -14,7 +14,7 @@ declare
   mail2 text := 'rls-' || gen_random_uuid() || '@example.com';
   inv1 uuid; inv2 uuid; inv3 uuid; inv_old uuid;
   base_id uuid;
-  w_pub uuid; w_draft uuid; w_self uuid; it uuid; it_draft uuid; w_old uuid;
+  w_pub uuid; w_draft uuid; w_self uuid; it uuid; it_draft uuid; w_old uuid; prog uuid; mon date := public.monday(current_date + 14);
   n int;
   t text;
 begin
@@ -316,6 +316,38 @@ begin
   perform set_config('request.jwt.claims', json_build_object('sub', coach2, 'role', 'authenticated')::text, true);
   select count(*) into n from public.measurements where athlete_id = a1;
   assert n = 0, 'чужой тренер видит замеры';
+
+  -- Программы и видимость (этап 6)
+  perform set_config('request.jwt.claims', json_build_object('sub', coach1, 'role', 'authenticated')::text, true);
+  insert into public.programs (name, weeks) values ('Неделя 1', 1) returning id into prog;
+  insert into public.program_workouts (program_id, week, day, title, items) values
+    (prog, 1, 0, 'Пн', '[{"name": "Присед", "result_type": "weight_reps", "planned_sets": 4, "pct": 70}]'),
+    (prog, 1, 2, 'Ср', '[{"name": "Становая", "result_type": "weight_reps", "planned_sets": 4}]'),
+    (prog, 1, 4, 'Пт', '[{"name": "Кор", "result_type": "time", "planned_sets": 5}]');
+  assert public.assign_program(prog, array[a1, a2], mon, 'add') = 6, 'программа назначилась не всем';
+  assert public.assign_program(prog, array[a1], mon, 'skip') = 0, '«пропустить» положило тренировки поверх';
+  select count(*) into n from public.workouts where athlete_id = a2 and date in (mon, mon + 2, mon + 4);
+  assert n = 3, 'у атлета 2 нет Пн/Ср/Пт';
+  select count(*) into n from public.workout_items i join public.workouts w on w.id = i.workout_id where w.athlete_id = a1 and w.date = mon and i.pct = 70;
+  assert n = 1, '% от 1ПМ не перенёсся в назначенную тренировку';
+  assert public.copy_week(a1, mon, array[a2], mon + 7, 'add') = 3, 'неделя не скопировалась';
+  begin
+    perform public.assign_program(prog, array[a3], mon, 'add');
+    assert false, 'тренер назначил программу чужому атлету';
+  exception when insufficient_privilege then null;
+  end;
+  update public.coach_athletes set visible_days = 1 where athlete_id = a1;
+  perform set_config('request.jwt.claims', json_build_object('sub', a1, 'role', 'authenticated')::text, true);
+  select count(*) into n from public.workouts where date > current_date + 1 and not self;
+  assert n = 0, 'при видимости «1 день» атлет видит план дальше';
+  select count(*) into n from public.programs;
+  assert n = 0, 'атлет видит программы тренера';
+  update public.coach_athletes set visible_days = null where athlete_id = a1;
+  get diagnostics n = row_count;
+  assert n = 0, 'атлет сам открыл себе весь план';
+  perform set_config('request.jwt.claims', json_build_object('sub', coach2, 'role', 'authenticated')::text, true);
+  select count(*) into n from public.program_workouts where program_id = prog;
+  assert n = 0, 'чужой тренер видит программу';
 
   -- Без входа ничего не видно
   perform set_config('role', 'anon', true);

@@ -205,3 +205,19 @@ main:has(.week) { max-width: 1200px; }
 .compare img, .compare .ex-noimg { width: 100%; aspect-ratio: 3 / 4; object-fit: cover; border-radius: 12px; }
 .compare figcaption { font-size: 0.85rem; color: var(--muted); text-align: center; }
 label.btn { display: flex; align-items: center; justify-content: center; color: var(--on-primary); font-size: 1rem; }
+
+/* Этап 6: программы, перетаскивание */
+.plan-tools { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+.plan-tools .btn { text-decoration: none; display: inline-flex; align-items: center; }
+.dialog { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; }
+.targets { display: flex; flex-direction: column; max-height: 260px; overflow-y: auto; }
+.day.drop { outline: 2px dashed var(--primary); }
+.wcard.dragging { opacity: 0.85; box-shadow: 0 8px 24px rgba(0,0,0,0.2); }
+.drag-handle { position: absolute; left: 2px; bottom: 2px; min-width: 32px; min-height: 32px; border: 0; background: none; color: var(--muted); cursor: grab; touch-action: none; }
+.wcard-open { padding-bottom: 28px; }
+.pct { display: inline-block; padding: 4px 10px; border-radius: 999px; background: var(--done-bg); font-weight: 600; }
+.pct-ask { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; border-radius: 12px; }
+.pct-ask input { width: 90px; min-height: 40px; }
+.pct-input { flex-direction: row; align-items: center; gap: 4px; flex: 0 0 auto !important; }
+.pct-input input { width: 64px; min-height: 44px; text-align: center; }
+.link-row { width: 100%; padding: 4px 0; background: none; border: 0; font: inherit; color: inherit; cursor: pointer; }

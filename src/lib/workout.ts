@@ -25,6 +25,7 @@ export type WorkoutItem = {
   superset: number | null
   block_note: string
   self?: boolean
+  pct?: number | null  // % от 1ПМ этого упражнения
 }
 
 export type Workout = {

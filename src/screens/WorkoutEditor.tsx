@@ -33,21 +33,32 @@ const blank = (s: Partial<Suggestion> & { name: string }, position: number): Wor
 const norm = (s: string) => s.toLowerCase().replaceAll('ё', 'е')
 
 /** Редактор тренировки тренера. Ничего не создаётся в базе до «Сохранить». */
-export function WorkoutEditor({ athleteId, athleteName, date, workout, exercises, onClose, onSaved }: {
-  athleteId: string
-  athleteName: string
-  date: string
+export type Draft = { title: string; prescription: string; published: boolean; items: WorkoutItem[] }
+
+/** Снимок тренировки для шаблона или дня программы — без id, чтобы копии не путались с оригиналом. */
+export const snapshot = (items: WorkoutItem[]) =>
+  items.filter((i) => !i.self).sort((a, b) => a.position - b.position)
+    .map(({ id: _id, workout_id: _w, self: _s, ...rest }, position) => ({ ...rest, position }))
+
+export function WorkoutEditor({ athleteId, athleteName = '', date = '', workout, template, heading, save: saveOverride, exercises, onClose, onSaved }: {
+  athleteId?: string
+  athleteName?: string
+  date?: string
   workout: Workout | null
+  template?: { title: string; prescription: string; items: Partial<WorkoutItem>[] }  // «Из шаблона» / день программы
+  heading?: string
+  save?: (d: Draft) => Promise<string | null>  // своё сохранение (день программы); вернуть текст ошибки или null
   exercises: Exercise[]
   onClose: () => void
   onSaved: () => void
 }) {
   const initial = useMemo(() => ({
-    title: workout?.title ?? '',
-    prescription: workout?.prescription ?? '',
+    title: workout?.title ?? template?.title ?? '',
+    prescription: workout?.prescription ?? template?.prescription ?? '',
     published: workout?.published ?? true,
-    items: (workout?.workout_items ?? []).filter((i) => !i.self).sort((a, b) => a.position - b.position),
-  }), [workout])
+    items: workout ? (workout.workout_items ?? []).filter((i) => !i.self).sort((a, b) => a.position - b.position)
+      : (template?.items ?? []).map((i, position) => ({ ...blank({ name: '', ...i } as Suggestion, position), ...i, id: crypto.randomUUID() }) as WorkoutItem),
+  }), [workout, template])
   const [title, setTitle] = useState(initial.title)
   const [prescription, setPrescription] = useState(initial.prescription)
   const [published, setPublished] = useState(initial.published)
@@ -105,25 +116,30 @@ export function WorkoutEditor({ athleteId, athleteName, date, workout, exercises
     if (items.some((i) => !i.name.trim())) return setError('У каждого задания должно быть название')
     setBusy(true)
     setError('')
-    const { error } = await supabase.rpc('save_workout', {
-      w: { id: workout?.id ?? null, athlete_id: athleteId, date: workout?.date ?? date, title: title.trim(), prescription, published },
-      items: items.map((i, position) => ({ ...i, position, name: i.name.trim() })),
-    })
+    const clean = items.map((i, position) => ({ ...i, position, name: i.name.trim() }))
+    const err = saveOverride
+      ? await saveOverride({ title: title.trim(), prescription, published, items: clean })
+      : (await supabase.rpc('save_workout', {
+        w: { id: workout?.id ?? null, athlete_id: athleteId, date: workout?.date ?? date, title: title.trim(), prescription, published },
+        items: clean,
+      })).error?.message ?? null
     setBusy(false)
-    if (error) return setError('Не сохранилось: ' + error.message)
+    if (err) return setError('Не сохранилось: ' + err)
     onSaved()
   }
 
   return (
     <section ref={box} className="editor card">
       <div className="row-between">
-        <b>{fmtDay(workout?.date ?? date)} — {athleteName}</b>
+        <b>{heading ?? `${fmtDay(workout?.date ?? date)} — ${athleteName}`}</b>
         <button className="back" onClick={close}>✕</button>
       </div>
-      <div className="segmented">
-        <button className={!published ? 'active' : ''} onClick={() => setPublished(false)}>Черновик</button>
-        <button className={published ? 'active' : ''} onClick={() => setPublished(true)}>Опубликовано</button>
-      </div>
+      {!saveOverride && (
+        <div className="segmented">
+          <button className={!published ? 'active' : ''} onClick={() => setPublished(false)}>Черновик</button>
+          <button className={published ? 'active' : ''} onClick={() => setPublished(true)}>Опубликовано</button>
+        </div>
+      )}
       <input placeholder="Название тренировки" value={title} onChange={(e) => setTitle(e.target.value)} />
       <textarea rows={2} placeholder="Предписание к тренировке" value={prescription} onChange={(e) => setPrescription(e.target.value)} />
 
@@ -200,6 +216,13 @@ function ItemRow({ item, label, groupStart, inGroup, hasNext, onChange, onMenu }
         <select value={item.result_type} onChange={(e) => onChange({ result_type: e.target.value as ResultType })} aria-label="Тип результата">
           {RESULT_TYPES.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
         </select>
+        {['weight_reps', 'weight'].includes(item.result_type) && (
+          <label className="pct-input">
+            <input inputMode="decimal" placeholder="%" value={item.pct ?? ''} aria-label="% от 1ПМ"
+              onChange={(e) => onChange({ pct: e.target.value ? Number(e.target.value.replace(',', '.')) || null : null })} />
+            <span className="muted">% 1ПМ</span>
+          </label>
+        )}
         <div className="stepper">
           <button type="button" onClick={() => onChange({ planned_sets: Math.max(0, item.planned_sets - 1) })} aria-label="Меньше подходов">−</button>
           <span>{item.planned_sets}</span>
@@ -211,13 +234,13 @@ function ItemRow({ item, label, groupStart, inGroup, hasNext, onChange, onMenu }
 }
 
 /** «+ Задание»: поиск сразу в истории атлета, шаблонах тренера и базе упражнений. */
-function AddItem({ athleteId, exercises, onAdd }: { athleteId: string; exercises: Exercise[]; onAdd: (s: Suggestion) => void }) {
+function AddItem({ athleteId, exercises, onAdd }: { athleteId?: string; exercises: Exercise[]; onAdd: (s: Suggestion) => void }) {
   const [q, setQ] = useState('')
   const [history, setHistory] = useState<Suggestion[]>([])
   const [templates, setTemplates] = useState<Template[]>([])
 
   useEffect(() => {
-    supabase.from('workout_items')
+    if (athleteId) supabase.from('workout_items')
       .select('name, exercise_id, plan_text, video_url, result_type, planned_sets, workouts!inner(athlete_id, date)')
       .eq('workouts.athlete_id', athleteId).eq('self', false).limit(1000)
       .then(({ data }) => {

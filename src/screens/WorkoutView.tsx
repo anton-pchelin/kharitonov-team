@@ -4,7 +4,7 @@ import { Video } from '../lib/video'
 import { fmtNum, fmtTime, parseNum, parseTime } from '../lib/format'
 import { itemLabels, resultLabel, type ResultType, type Workout, type WorkoutItem } from '../lib/workout'
 import { previousSets, type Comment, type PastSet, type SetResult } from '../lib/offline'
-import { exerciseKey, isRecordSet } from '../lib/progress'
+import { exerciseKey, isRecordSet, maxFor, pctWeight, type MaxRecord } from '../lib/progress'
 
 export type ViewProps = {
   workout: Workout
@@ -14,6 +14,8 @@ export type ViewProps = {
   me: string
   names: Record<string, string>
   editable: boolean
+  maxes?: MaxRecord[]  // рекорды вручную; нет — это экран тренера, показываем только «70% от 1ПМ»
+  onMax?: (item: WorkoutItem, weight: number) => void
   onSet?: (r: SetResult) => void
   onUnset?: (itemId: string, setNo: number) => void
   onComment?: (itemId: string | null, text: string) => void
@@ -83,6 +85,7 @@ function ItemView(p: ViewProps & { item: WorkoutItem; label: string; note: strin
         <b className="task-name">{item.name}</b>
         {item.result_type !== 'check' && <span className="muted">{item.planned_sets}× {resultLabel(item.result_type)}</span>}
       </div>
+      {item.pct != null && <PctHint {...p} item={item} />}
       <Markup text={item.plan_text} />
       <div className="row-wrap">
         <Video url={item.video_url} />
@@ -101,6 +104,21 @@ function ItemView(p: ViewProps & { item: WorkoutItem; label: string; note: strin
       )}
       <Comments {...p} itemId={item.id} list={p.comments.filter((c) => c.item_id === item.id)} />
     </section>
+  )
+}
+
+function PctHint(p: ViewProps & { item: WorkoutItem }) {
+  const [v, setV] = useState('')
+  const pct = p.item.pct!
+  if (!p.maxes) return <span className="pct">{fmtNum(pct)}% от 1ПМ</span>
+  const max = maxFor(p.item, p.history, p.maxes)
+  if (max) return <span className="pct">≈ {fmtNum(pctWeight(pct, max))} кг ({fmtNum(pct)}% от {fmtNum(Math.round(max * 10) / 10)})</span>
+  return (
+    <form className="pct pct-ask" onSubmit={(e) => { e.preventDefault(); const n = parseNum(v); if (n && p.onMax) p.onMax(p.item, n) }}>
+      <span>{fmtNum(pct)}% от максимума — введите свой максимум:</span>
+      <input inputMode="decimal" placeholder="кг" value={v} onChange={(e) => setV(e.target.value)} disabled={!p.onMax} />
+      <button className="btn small" disabled={!p.onMax}>OK</button>
+    </form>
   )
 }
 

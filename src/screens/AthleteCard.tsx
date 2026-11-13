@@ -6,14 +6,16 @@ export function AthleteCard({ id }: { id: string }) {
   const [p, setP] = useState<Profile | null>(null)
   const [note, setNote] = useState('')
   const [saved, setSaved] = useState(true)
+  const [visible, setVisible] = useState<number | null>(null)
 
   useEffect(() => {
     Promise.all([
       supabase.from('profiles').select('*').eq('id', id).single(),
-      supabase.from('coach_athletes').select('note').eq('athlete_id', id).single(),
+      supabase.from('coach_athletes').select('note, visible_days').eq('athlete_id', id).single(),
     ]).then(([a, b]) => {
       setP(a.data)
       setNote(b.data?.note ?? '')
+      setVisible(b.data?.visible_days ?? null)
     })
   }, [id])
 
@@ -44,6 +46,20 @@ export function AthleteCard({ id }: { id: string }) {
           </div>
         ))}
       </div>
+      <label>Атлет видит план вперёд
+        <select value={visible ?? ''} onChange={async (e) => {
+          const v = e.target.value === '' ? null : Number(e.target.value)
+          setVisible(v)
+          const { error } = await supabase.from('coach_athletes').update({ visible_days: v }).eq('athlete_id', id)
+          if (error) alert('Не сохранилось: ' + error.message)
+        }}>
+          <option value="">весь план</option>
+          <option value="0">только сегодня</option>
+          <option value="1">на 1 день вперёд</option>
+          <option value="3">на 3 дня вперёд</option>
+          <option value="7">на 7 дней вперёд</option>
+        </select>
+      </label>
       <label>Заметка тренера (атлет её не видит)
         <textarea rows={4} value={note} onChange={(e) => { setNote(e.target.value); setSaved(false) }} />
       </label>

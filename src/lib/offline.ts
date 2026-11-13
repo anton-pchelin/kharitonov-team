@@ -3,6 +3,7 @@
 import { supabase } from '../supabase'
 import { addDays, today } from './dates'
 import type { Workout, WorkoutItem } from './workout'
+import type { MaxRecord } from './progress'
 
 export type SetResult = {
   item_id: string
@@ -19,7 +20,7 @@ export type Comment = { id: string; workout_id: string; item_id: string | null; 
 /** Подход из прошлых тренировок — для подсказки «прошлый раз» и графиков. */
 export type PastSet = SetResult & { date: string; name: string; exercise_id: string | null }
 
-export type Cache = { workouts: Workout[]; results: SetResult[]; comments: Comment[]; history: PastSet[]; syncedAt: string | null }
+export type Cache = { workouts: Workout[]; results: SetResult[]; comments: Comment[]; history: PastSet[]; records: MaxRecord[]; syncedAt: string | null }
 export type Op =
   | { t: 'set'; row: SetResult }
   | { t: 'unset'; item_id: string; set_no: number }
@@ -27,8 +28,9 @@ export type Op =
   | { t: 'workout'; row: Workout }
   | { t: 'item'; row: WorkoutItem & { workout_id: string } }
   | { t: 'complete'; id: string; at: string }
+  | { t: 'record'; row: MaxRecord & { id: string; athlete_id: string } }
 
-const empty = (): Cache => ({ workouts: [], results: [], comments: [], history: [], syncedAt: null })
+const empty = (): Cache => ({ workouts: [], results: [], comments: [], history: [], records: [], syncedAt: null })
 const sameSet = (a: { item_id: string; set_no: number }, b: { item_id: string; set_no: number }) =>
   a.item_id === b.item_id && a.set_no === b.set_no
 
@@ -45,6 +47,7 @@ export function applyLocal(c: Cache, op: Op): Cache {
         : { ...w, workout_items: [...(w.workout_items ?? []), op.row] }),
     }
     case 'complete': return { ...c, workouts: c.workouts.map((w) => (w.id === op.id ? { ...w, completed_at: w.completed_at ?? op.at } : w)) }
+    case 'record': return { ...c, records: [...(c.records ?? []), op.row] }
   }
 }
 
@@ -61,6 +64,7 @@ async function send(op: Op) {
     }
     case 'item': return supabase.from('workout_items').upsert({ ...op.row, self: true }, { onConflict: 'id', ignoreDuplicates: true })
     case 'complete': return supabase.rpc('complete_workout', { p_id: op.id, p_at: op.at })
+    case 'record': return supabase.from('records').upsert(op.row, { onConflict: 'id', ignoreDuplicates: true })
   }
 }
 
@@ -133,13 +137,14 @@ export class OfflineStore {
   private async refresh() {
     const from = addDays(today(), -7)
     const to = addDays(today(), 14)
-    const [w, r] = await Promise.all([
+    const [w, r, rec] = await Promise.all([
       supabase.from('workouts').select('*, workout_items(*)').eq('athlete_id', this.userId).gte('date', from).lte('date', to),
       supabase.from('set_results')
         .select('item_id, set_no, weight, reps, time_sec, meters, calories, rounds, done, workout_items!inner(name, exercise_id, workouts!inner(date))')
         .eq('athlete_id', this.userId).gte('workout_items.workouts.date', addDays(today(), -365)),
+      supabase.from('records').select('exercise_id, name, weight, reps').eq('athlete_id', this.userId),
     ])
-    if (w.error || r.error) return
+    if (w.error || r.error || rec.error) return
     const workouts = w.data as Workout[]
     const ids = workouts.map((x) => x.id)
     const c = ids.length ? await supabase.from('comments').select('*').in('workout_id', ids).order('created_at') : { data: [], error: null }
@@ -152,6 +157,7 @@ export class OfflineStore {
       results: rows.filter((x) => itemIds.has(x.item_id)).map(({ workout_items: _, ...s }) => s),
       comments: c.data as Comment[],
       history: rows.map(({ workout_items: i, ...s }) => ({ ...s, name: i.name, exercise_id: i.exercise_id, date: i.workouts.date })),
+      records: rec.data as MaxRecord[],
       syncedAt: new Date().toISOString(),
     }
     for (const op of this.queue) cache = applyLocal(cache, op)

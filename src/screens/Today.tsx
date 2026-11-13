@@ -59,7 +59,8 @@ export function Today({ profile, date: routeDate }: { profile: Profile; date?: s
       {day.map((w) => (
         <div key={w.id}>
           <WorkoutView workout={w} results={data.results} comments={data.comments} history={data.history}
-            me={profile.id} names={names} editable={editable}
+            me={profile.id} names={names} editable={editable} maxes={data.records ?? []}
+            onMax={(item, weight) => store.do({ t: 'record', row: { id: crypto.randomUUID(), athlete_id: profile.id, exercise_id: item.exercise_id, name: item.name, weight, reps: 1 } })}
             onSet={(row) => store.do({ t: 'set', row })}
             onUnset={(item_id, set_no) => store.do({ t: 'unset', item_id, set_no })}
             onComment={(item_id, text) => store.do({

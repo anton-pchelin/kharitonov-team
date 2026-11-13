@@ -123,3 +123,17 @@ describe('прогресс', async () => {
     expect(weeklyStats(squats).map((w) => w.tonnage)).toEqual([400, 450, 500])
   })
 })
+
+describe('% от максимума', async () => {
+  const { maxFor, pctWeight } = await import('./lib/progress')
+  it('70% от 1ПМ 100 кг — 70 кг; от 80 — 56; округление до 2,5', () => {
+    expect(pctWeight(70, 100)).toBe(70)
+    expect(pctWeight(70, 80)).toBe(55)  // 56 → ближайшее кратное 2,5
+    expect(pctWeight(65, 100)).toBe(65)
+  })
+  it('максимум берётся из рекорда вручную и из истории', () => {
+    const item = { exercise_id: 'dl', name: 'Становая' }
+    expect(maxFor(item, [], [{ exercise_id: 'dl', name: 'Становая', weight: 100, reps: 1 }])).toBe(100)
+    expect(maxFor(item, [], [])).toBeNull()
+  })
+})
