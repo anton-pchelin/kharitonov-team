@@ -9,6 +9,7 @@ const TOKEN = Deno.env.get('TELEGRAM_BOT_TOKEN') ?? ''
 const SECRET = Deno.env.get('TELEGRAM_WEBHOOK_SECRET') ?? ''
 const SITE = 'https://anton-pchelin.github.io/kharitonov-team/'
 const CODE_TTL_MIN = 10
+const REUSE_MIN = 2  // после подтверждения код ещё 2 минуты отдаёт вход: ответ мог не дойти, пока человек был в Telegram
 const db = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!)
 
 const cors = {
@@ -76,25 +77,36 @@ async function onUpdate(u: {
 
 async function check(code: string) {
   const { data: row } = await db.from('telegram_logins').select('*').eq('code', code).maybeSingle()
-  if (!row || row.used_at || row.created_at < freshSince()) return json({ status: 'expired' })
+  const reuseSince = new Date(Date.now() - REUSE_MIN * 60_000).getTime()
+  if (!row || new Date(row.created_at).getTime() < Date.now() - CODE_TTL_MIN * 60_000) return json({ status: 'expired' })
+  if (row.used_at && new Date(row.used_at).getTime() < reuseSince) return json({ status: 'expired' })
   if (!row.confirmed_at) return json({ status: 'pending' })
-
-  // Код одноразовый: помечаем «использован» условием, чтобы два параллельных запроса не получили сессию оба.
-  const { data: used } = await db.from('telegram_logins')
-    .update({ used_at: new Date().toISOString() }).eq('code', code).is('used_at', null).select('code')
-  if (!used?.length) return json({ status: 'expired' })
+  if (!row.used_at) await db.from('telegram_logins').update({ used_at: new Date().toISOString() }).eq('code', code)
 
   // Служебный адрес: писем на него не шлём, нужен только потому, что учётке Supabase нужен email.
   const email = `tg${row.telegram_id}@telegram.invalid`
-  const created = await db.auth.admin.createUser({
-    email,
-    email_confirm: true,
-    app_metadata: { telegram_id: row.telegram_id, telegram_username: row.telegram_username, name: row.name },
-  })
+  const created = await db.auth.admin.createUser({ email, email_confirm: true })
   if (created.error && created.error.code !== 'email_exists') throw created.error
 
   const link = await db.auth.admin.generateLink({ type: 'magiclink', email })
   if (link.error) throw link.error
+
+  // Профиль создаёт триггер; Telegram-данные и роль тренера дописываем здесь, при каждом входе:
+  // ник, добавленный в coach_telegram_usernames позже, сделает человека тренером со следующего входа.
+  const userId = link.data.user.id
+  const username = row.telegram_username?.toLowerCase()
+  const [{ data: coach }, { data: profile }] = await Promise.all([
+    username
+      ? db.from('coach_telegram_usernames').select('username').eq('username', username).maybeSingle()
+      : Promise.resolve({ data: null }),
+    db.from('profiles').select('name').eq('id', userId).single(),
+  ])
+  const { error } = await db.from('profiles').update({
+    telegram_id: row.telegram_id,
+    ...(profile?.name ? {} : { name: row.name ?? '' }),
+    ...(coach ? { role: 'coach' } : {}),
+  }).eq('id', userId)
+  if (error) throw error
   return json({ status: 'ok', token_hash: link.data.properties.hashed_token })
 }
 
