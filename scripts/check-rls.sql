@@ -122,6 +122,9 @@ begin
   update public.exercises set name = 'взлом' where id = base_id;
   get diagnostics n = row_count;
   assert n = 0, 'атлет изменил упражнение из базы';
+  update public.exercises set image_url = null where id = base_id;
+  get diagnostics n = row_count;
+  assert n = 0, 'атлет убрал картинку у упражнения из базы';
   insert into public.exercises (name, source) values ('Своё упражнение атлета', 'athlete');
   begin
     insert into public.exercises (name, source) values ('Подделка', 'coach');
@@ -144,6 +147,9 @@ begin
   update public.exercises set name = name, video_url = 'https://rutube.ru/video/1/' where id = base_id;
   get diagnostics n = row_count;
   assert n = 1, 'тренер не смог изменить упражнение';
+  update public.exercises set image_url = null where id = base_id;
+  get diagnostics n = row_count;
+  assert n = 1, 'тренер не смог убрать картинку';
   begin
     update public.exercises set video_url = 'javascript:alert(1)' where id = base_id;
     assert false, 'база приняла ссылку javascript:';

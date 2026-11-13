@@ -106,6 +106,13 @@ function ExerciseCard({ ex, canEdit, muscles, equipments, onBack, onSaved }: {
     onSaved(data as Exercise)
   }
 
+  const removeImage = async () => {
+    if (!ex || !confirm('Убрать картинку у этого упражнения? У всех атлетов она тоже пропадёт.')) return
+    const { data, error } = await supabase.from('exercises').update({ image_url: null }).eq('id', ex.id).select().single()
+    if (error) return setError('Не получилось: ' + error.message)
+    onSaved(data as Exercise)
+  }
+
   return (
     <>
       <button className="back" onClick={onBack}>← Упражнения</button>
@@ -122,6 +129,8 @@ function ExerciseCard({ ex, canEdit, muscles, equipments, onBack, onSaved }: {
             <a className="btn" href={ex.video_url} target="_blank" rel="noreferrer">▶ Смотреть видео</a>
           )}
           {canEdit && <button className="btn secondary" onClick={() => setEditing(true)}>Изменить название или видео</button>}
+          {canEdit && ex.image_url && <button className="btn secondary" onClick={removeImage}>Убрать картинку</button>}
+          {error && <p className="error">{error}</p>}
         </>
       )}
       {editing && (

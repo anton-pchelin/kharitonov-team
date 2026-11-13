@@ -1,9 +1,10 @@
-import { defineConfig } from 'vite'
+import { defineConfig } from 'vitest/config'
 import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
 
 export default defineConfig({
-  base: './',  // относительные пути: сайт работает и в корне домена, и в подпапке GitHub Pages
+  base: './',
+  test: { exclude: ['**/node_modules/**', '.claude/**'] },  // в .claude/worktrees — копии проекта других сессий  // относительные пути: сайт работает и в корне домена, и в подпапке GitHub Pages
   plugins: [
     react(),
     VitePWA({
