@@ -8,7 +8,7 @@
 | Путь | Что там |
 |---|---|
 | `src/App.tsx` | Вход в приложение: сессия, профиль, приглашение по ссылке, вкладки, маршруты `#/…`, лого |
-| `src/screens/` | Экраны: `Login` (Telegram, запасной — email + код), `Athletes` (список, «Пригласить»), `AthleteCard` (анкета атлета + заметка тренера), `MyProfile` (анкета атлета, имя при первом входе), `Exercises` (каталог, поиск, правка), `Settings` (тема, палитры, выход), `InstallHint` («Добавить на экран Домой») |
+| `src/screens/` | Экраны: `Login` (вход через Telegram; входа по email нет — решено 2026-11-13), `Athletes` (список, «Пригласить»), `AthleteCard` (анкета атлета + заметка тренера), `MyProfile` (анкета атлета, имя при первом входе), `Exercises` (каталог, поиск, правка), `Settings` (тема, палитры, выход), `InstallHint` («Добавить на экран Домой») |
 | `src/theme.ts` | 16 палитр и правило вычисления цветов (ПЛАН.md п. 9). Экраны берут цвета **только** из CSS-переменных `--primary --on-primary --secondary --on-secondary --bg --text --card --done-bg --muted --line` |
 | `src/search.ts` | Поиск упражнений (все слова запроса, ё=е, по русскому и английскому названию), проверка ссылки на видео |
 | `src/supabase.ts` | Клиент Supabase и тип `Profile` |
@@ -47,9 +47,7 @@ npm run build                # проверка типов + сборка в dis
 
 - `.env.local` (не в git): `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`. Для выкладки те же два значения — в GitHub: Settings → Secrets and variables → Actions → **Variables**.
 - Supabase, панель проекта:
-  - Authentication → Sign In / Providers → Email: включён, «Confirm email» включён; длина кода 6.
-  - Authentication → Emails → Templates → **Magic Link** и **Confirm signup** (новому человеку приходит второй): в письме должен быть код `{{ .Token }}` (вход по коду, не по ссылке).
-  - Authentication → Emails → SMTP Settings: бесплатный почтовый сервис (Resend / Brevo / Яндекс), не встроенная почта.
+  - Authentication → Sign In / Providers → Email: должен оставаться включён — через него функция `telegram` выдаёт сессию (`generateLink` + `verifyOtp`); писем не шлём, почта не настроена.
   - Authentication → URL Configuration → Site URL: адрес сайта на GitHub Pages.
   - Тренер: `insert into coach_telegram_usernames values ('ник');` или `insert into coach_emails values ('адрес');` — **до** его первого входа (`npx supabase db query --remote --yes "…"`).
   - Edge Functions → Secrets: `TELEGRAM_BOT_TOKEN` (токен от @BotFather, вписывает владелец), `TELEGRAM_WEBHOOK_SECRET` (случайная строка; копия — в `.env.local`).
