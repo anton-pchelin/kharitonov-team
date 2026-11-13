@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react'
 import { supabase, type Profile } from '../supabase'
 import { PALETTES, saveLocalTheme, type ThemeMode } from '../theme'
 import { InstallHint } from './InstallHint'
@@ -48,9 +49,28 @@ export function Settings({ profile, onChange }: { profile: Profile; onChange: (p
         </label>
       ))}
       <p className="muted">Сообщения не приходят? Откройте бота <a href="https://t.me/kharitonov_team_bot" target="_blank" rel="noreferrer">@kharitonov_team_bot</a> и нажмите «Start».</p>
+      {profile.role === 'coach' && <StorageUsage />}
       <InstallHint />
       <p className="muted">{profile.name} · {profile.email} · {profile.role === 'coach' ? 'тренер' : 'атлет'}</p>
       <button className="btn secondary" onClick={() => supabase.auth.signOut()}>Выйти</button>
+    </>
+  )
+}
+
+const LIMIT = 1024 ** 3  // бесплатное хранилище Supabase — 1 ГБ
+
+function StorageUsage() {
+  const [used, setUsed] = useState<number | null>(null)
+  useEffect(() => { supabase.rpc('storage_usage').then(({ data }) => setUsed(Number(data ?? 0))) }, [])
+  if (used == null) return null
+  const mb = (n: number) => (n / 1024 ** 2).toFixed(n < 10 * 1024 ** 2 ? 1 : 0).replace('.', ',')
+  return (
+    <>
+      <h3>Хранилище</h3>
+      <p className={used > LIMIT * 0.9 ? 'storage-warn' : 'muted'}>
+        Фото и видео атлетов: {mb(used)} МБ из {mb(LIMIT)} МБ
+        {used > LIMIT * 0.9 && ' — место почти закончилось. Видео старше 30 дней удаляются сами.'}
+      </p>
     </>
   )
 }

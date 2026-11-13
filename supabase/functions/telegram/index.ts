@@ -131,6 +131,17 @@ async function flush(): Promise<number> {
   return sent
 }
 
+/** Видео атлетов храним 30 дней: файл удаляем, в комментарии остаётся «видео удалено». */
+async function cleanupVideos(): Promise<number> {
+  const { data } = await db.rpc('expired_videos')
+  const rows = (data ?? []) as { id: string; video_path: string }[]
+  if (!rows.length) return 0
+  const { error } = await db.storage.from('videos').remove(rows.map((r) => r.video_path))
+  if (error) throw error
+  await db.from('comments').update({ video_path: null, video_deleted: true }).in('id', rows.map((r) => r.id))
+  return rows.length
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response(null, { headers: cors })
   try {
@@ -152,11 +163,13 @@ Deno.serve(async (req) => {
       return json({ code, bot: botUsername })
     }
     if (body.action === 'check' && typeof body.code === 'string') return await check(body.code)
-    // pg_cron раз в минуту: напоминания на завтра (в 20:00 у атлета) и отправка очереди
+    // pg_cron раз в минуту: напоминания на завтра (в 20:00 у атлета), отправка очереди, раз в час — чистка старых видео
     if (body.action === 'cron' && SECRET && body.secret === SECRET) {
       await db.rpc('enqueue_reminders')
-      return json({ sent: await flush() })
+      const sent = await flush()
+      return json({ sent, ...(new Date().getUTCMinutes() === 0 ? { removed: await cleanupVideos() } : {}) })
     }
+    if (body.action === 'cleanup' && SECRET && body.secret === SECRET) return json({ removed: await cleanupVideos() })
     // Кнопка тренера «Отправить напоминания сейчас» — только его атлетам, без учёта часа
     if (body.action === 'remind_now') {
       const { data: auth } = await db.auth.getUser(req.headers.get('authorization')?.replace('Bearer ', '') ?? '')

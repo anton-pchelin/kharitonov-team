@@ -221,3 +221,11 @@ label.btn { display: flex; align-items: center; justify-content: center; color: 
 .pct-input { flex-direction: row; align-items: center; gap: 4px; flex: 0 0 auto !important; }
 .pct-input input { width: 64px; min-height: 44px; text-align: center; }
 .link-row { width: 100%; padding: 4px 0; background: none; border: 0; font: inherit; color: inherit; cursor: pointer; }
+
+/* Этап 7: видео и лента */
+.comment-video { display: block; width: 100%; max-height: 360px; margin-top: 6px; border-radius: 12px; background: #000; }
+.feed-card { display: flex; flex-direction: column; gap: 6px; }
+.feed-head { display: flex; align-items: center; gap: 10px; }
+.avatar { width: 40px; height: 40px; flex: none; border-radius: 50%; display: grid; place-items: center; background: var(--secondary); color: var(--on-secondary); font-weight: 800; }
+.missed { color: #B3261E; font-weight: 600; }
+.storage-warn { padding: 12px 14px; border-radius: var(--radius); background: #FDE2E1; color: #8A1C17; }

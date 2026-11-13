@@ -1,4 +1,5 @@
-import { useState, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
+import { supabase } from '../supabase'
 import { Markup } from '../lib/markup'
 import { Video } from '../lib/video'
 import { fmtNum, fmtTime, parseNum, parseTime } from '../lib/format'
@@ -19,6 +20,7 @@ export type ViewProps = {
   onSet?: (r: SetResult) => void
   onUnset?: (itemId: string, setNo: number) => void
   onComment?: (itemId: string | null, text: string) => void
+  onVideo?: (itemId: string, text: string, file: File) => Promise<void>  // атлет прикладывает видео подхода
   extra?: (item: WorkoutItem) => ReactNode  // доп. кнопки задания (видео, таймер — следующие этапы)
 }
 
@@ -161,14 +163,18 @@ function SetRow({ n, type, value, hint, record, editable, onPut }: {
 function Comments(p: ViewProps & { itemId: string | null; list: Comment[] }) {
   const [text, setText] = useState('')
   const [open, setOpen] = useState(false)
+  const [busy, setBusy] = useState('')
   const canWrite = !!p.onComment
   if (!p.list.length && !canWrite) return null
   return (
     <div className="comments">
       {p.list.map((c) => (
-        <p key={c.id} className={'comment' + (c.author_id === p.me ? ' mine' : '')}>
+        <div key={c.id} className={'comment' + (c.author_id === p.me ? ' mine' : '')}>
           💬 {c.author_id !== p.me && <b>{p.names[c.author_id] ?? ''}: </b>}{c.text}
-        </p>
+          {c.video_path?.startsWith('local:') && <small className="muted"> 🎬 видео отправится, когда появится сеть</small>}
+          {c.video_path && !c.video_path.startsWith('local:') && <CommentVideo path={c.video_path} />}
+          {c.video_deleted && <small className="muted"> 🎬 видео удалено (старше 30 дней)</small>}
+        </div>
       ))}
       {canWrite && !open && <button className="link-btn" onClick={() => setOpen(true)}>💬 {p.itemId ? 'Комментарий' : 'Комментарий к тренировке'}</button>}
       {canWrite && open && (
@@ -181,8 +187,35 @@ function Comments(p: ViewProps & { itemId: string | null; list: Comment[] }) {
         }}>
           <textarea rows={2} value={text} autoFocus onChange={(e) => setText(e.target.value)} placeholder="Например: резина синяя" />
           <button className="btn small">Отправить</button>
+          {p.onVideo && p.itemId && (
+            <label className="btn small secondary">{busy || '🎬 Прикрепить видео'}
+              <input type="file" accept="video/*" hidden disabled={!!busy} onChange={async (e) => {
+                const f = e.target.files?.[0]
+                if (!f) return
+                setBusy('Готовлю видео…')
+                try {
+                  await p.onVideo!(p.itemId!, text.trim(), f)
+                  setText('')
+                  setOpen(false)
+                } catch (err) {
+                  alert((err as Error).message)
+                } finally {
+                  setBusy('')
+                }
+              }} />
+            </label>
+          )}
         </form>
       )}
     </div>
   )
+}
+
+/** Видео из закрытого хранилища: ссылка на час, плеер открывается в комментарии. */
+function CommentVideo({ path }: { path: string }) {
+  const [url, setUrl] = useState('')
+  useEffect(() => {
+    supabase.storage.from('videos').createSignedUrl(path, 3600).then(({ data }) => setUrl(data?.signedUrl ?? ''))
+  }, [path])
+  return url ? <video className="comment-video" src={url} controls playsInline preload="metadata" /> : <small className="muted"> 🎬 загрузка видео…</small>
 }

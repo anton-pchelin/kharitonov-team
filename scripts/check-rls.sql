@@ -349,6 +349,35 @@ begin
   select count(*) into n from public.program_workouts where program_id = prog;
   assert n = 0, 'чужой тренер видит программу';
 
+  -- Лента и видео (этап 7)
+  perform set_config('request.jwt.claims', json_build_object('sub', a1, 'role', 'authenticated')::text, true);
+  insert into storage.objects (bucket_id, name) values ('videos', a1 || '/test.mp4');
+  begin
+    insert into storage.objects (bucket_id, name) values ('videos', a2 || '/test.mp4');
+    assert false, 'атлет положил видео в чужую папку';
+  exception when insufficient_privilege then null;
+  end;
+  update public.workouts set reviewed_at = now() where id = w_pub;
+  get diagnostics n = row_count;
+  assert n = 0, 'атлет сам отметил «просмотрено»';
+  begin
+    perform public.expired_videos();
+    assert false, 'атлет получил список видео на удаление';
+  exception when insufficient_privilege then null;
+  end;
+  perform set_config('request.jwt.claims', json_build_object('sub', a2, 'role', 'authenticated')::text, true);
+  select count(*) into n from storage.objects where bucket_id = 'videos' and name like a1 || '/%';
+  assert n = 0, 'атлет видит чужие видео';
+  perform set_config('request.jwt.claims', json_build_object('sub', coach1, 'role', 'authenticated')::text, true);
+  select count(*) into n from storage.objects where bucket_id = 'videos' and name = a1 || '/test.mp4';
+  assert n = 1, 'тренер не видит видео атлета';
+  update public.workouts set reviewed_at = now() where id = w_pub;
+  get diagnostics n = row_count;
+  assert n = 1, 'тренер не смог отметить «просмотрено»';
+  perform set_config('request.jwt.claims', json_build_object('sub', coach2, 'role', 'authenticated')::text, true);
+  select count(*) into n from storage.objects where bucket_id = 'videos' and name like a1 || '/%';
+  assert n = 0, 'чужой тренер видит видео';
+
   -- Без входа ничего не видно
   perform set_config('role', 'anon', true);
   perform set_config('request.jwt.claims', '{"role":"anon"}', true);

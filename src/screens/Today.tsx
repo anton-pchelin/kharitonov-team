@@ -4,6 +4,7 @@ import { searchExercises, type Exercise } from '../search'
 import { loadExercises } from './Exercises'
 import { WorkoutView, progress } from './WorkoutView'
 import { OfflineStore } from '../lib/offline'
+import { prepareVideo, putBlob } from '../lib/videoUpload'
 import { addDays, fmtDay, today } from '../lib/dates'
 import { fmtNum } from '../lib/format'
 import { RESULT_TYPES, type ResultType, type Workout } from '../lib/workout'
@@ -63,6 +64,12 @@ export function Today({ profile, date: routeDate }: { profile: Profile; date?: s
             onMax={(item, weight) => store.do({ t: 'record', row: { id: crypto.randomUUID(), athlete_id: profile.id, exercise_id: item.exercise_id, name: item.name, weight, reps: 1 } })}
             onSet={(row) => store.do({ t: 'set', row })}
             onUnset={(item_id, set_no) => store.do({ t: 'unset', item_id, set_no })}
+            onVideo={async (item_id, text, file) => {
+              const blob = await prepareVideo(file)
+              const id = crypto.randomUUID()
+              await putBlob(id, blob)
+              store.do({ t: 'video', row: { id, workout_id: w.id, item_id, author_id: profile.id, text: text || 'видео подхода', created_at: new Date().toISOString() } })
+            }}
             onComment={(item_id, text) => store.do({
               t: 'comment',
               row: { id: crypto.randomUUID(), workout_id: w.id, item_id, author_id: profile.id, text, created_at: new Date().toISOString() },

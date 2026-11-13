@@ -4,6 +4,7 @@ import { supabase } from '../supabase'
 import { addDays, today } from './dates'
 import type { Workout, WorkoutItem } from './workout'
 import type { MaxRecord } from './progress'
+import { delBlob, getBlob, videoExt } from './videoUpload'
 
 export type SetResult = {
   item_id: string
@@ -16,7 +17,11 @@ export type SetResult = {
   rounds?: number | null
   done: boolean
 }
-export type Comment = { id: string; workout_id: string; item_id: string | null; author_id: string; text: string; created_at: string }
+export type Comment = {
+  id: string; workout_id: string; item_id: string | null; author_id: string; text: string; created_at: string
+  video_path?: string | null  // 'local:…' — ещё в телефоне, ждёт сети
+  video_deleted?: boolean
+}
 /** Подход из прошлых тренировок — для подсказки «прошлый раз» и графиков. */
 export type PastSet = SetResult & { date: string; name: string; exercise_id: string | null }
 
@@ -29,6 +34,7 @@ export type Op =
   | { t: 'item'; row: WorkoutItem & { workout_id: string } }
   | { t: 'complete'; id: string; at: string }
   | { t: 'record'; row: MaxRecord & { id: string; athlete_id: string } }
+  | { t: 'video'; row: Comment }  // файл лежит в IndexedDB под ключом row.id
 
 const empty = (): Cache => ({ workouts: [], results: [], comments: [], history: [], records: [], syncedAt: null })
 const sameSet = (a: { item_id: string; set_no: number }, b: { item_id: string; set_no: number }) =>
@@ -48,12 +54,13 @@ export function applyLocal(c: Cache, op: Op): Cache {
     }
     case 'complete': return { ...c, workouts: c.workouts.map((w) => (w.id === op.id ? { ...w, completed_at: w.completed_at ?? op.at } : w)) }
     case 'record': return { ...c, records: [...(c.records ?? []), op.row] }
+    case 'video': return c.comments.some((x) => x.id === op.row.id) ? c : { ...c, comments: [...c.comments, { ...op.row, video_path: 'local:' + op.row.id }] }
   }
 }
 
 const isNetworkError = (e: { code?: string; message?: string }) => !navigator.onLine || !e.code
 
-async function send(op: Op) {
+async function send(op: Op, userId: string): Promise<{ error: { code?: string; message: string } | null }> {
   switch (op.t) {
     case 'set': return supabase.from('set_results').upsert({ ...op.row, updated_at: new Date().toISOString() }, { onConflict: 'item_id,set_no' })
     case 'unset': return supabase.from('set_results').delete().eq('item_id', op.item_id).eq('set_no', op.set_no)
@@ -65,6 +72,17 @@ async function send(op: Op) {
     case 'item': return supabase.from('workout_items').upsert({ ...op.row, self: true }, { onConflict: 'id', ignoreDuplicates: true })
     case 'complete': return supabase.rpc('complete_workout', { p_id: op.id, p_at: op.at })
     case 'record': return supabase.from('records').upsert(op.row, { onConflict: 'id', ignoreDuplicates: true })
+    case 'video': {
+      const blob = await getBlob(op.row.id)
+      if (!blob) return { error: null }  // уже ушло раньше
+      const path = `${userId}/${op.row.id}.${videoExt(blob.type)}`
+      const up = await supabase.storage.from('videos').upload(path, blob, { contentType: blob.type || 'video/mp4', upsert: true })
+      // ответ хранилища с кодом (нет прав, слишком большой файл) — не сеть, повтор не поможет
+      if (up.error) return { error: { message: up.error.message, code: 'status' in up.error ? String(up.error.status) : undefined } }
+      const r = await supabase.from('comments').upsert({ ...op.row, video_path: path }, { onConflict: 'id' })
+      if (!r.error) await delBlob(op.row.id)
+      return r
+    }
   }
 }
 
@@ -119,7 +137,7 @@ export class OfflineStore {
     this.flushing = true
     try {
       while (this.queue.length && navigator.onLine) {
-        const { error } = await send(this.queue[0])
+        const { error } = await send(this.queue[0], this.userId)
         if (error && isNetworkError(error)) break
         // ошибка самой базы (нет прав, неверные данные) повторами не лечится — снимаем, чтобы не держать очередь
         if (error) this.lastError = error.message

@@ -12,6 +12,7 @@ import { Plan } from './screens/Plan'
 import { Today } from './screens/Today'
 import { Progress } from './screens/Progress'
 import { Programs } from './screens/Programs'
+import { Feed } from './screens/Feed'
 
 const INVITE_KEY = 'inviteToken'
 
@@ -118,7 +119,7 @@ export function App() {
   }
 
   const tabs = isCoach
-    ? [['athletes', 'Атлеты'], ['plan', 'План'], ['exercises', 'Упражнения'], ['settings', 'Настройки']]
+    ? [['feed', 'Лента'], ['athletes', 'Атлеты'], ['plan', 'План'], ['exercises', 'Упражнения'], ['settings', 'Настройки']]
     : [['today', 'Тренировки'], ['progress', 'Прогресс'], ['exercises', 'Упражнения'], ['settings', 'Настройки']]
   const tab = tabs.some(([k]) => k === route[0]) || ['athlete', 'progress', 'profile', 'programs'].includes(route[0]) ? route[0] : tabs[0][0]
 
@@ -127,6 +128,7 @@ export function App() {
       <header className="top"><Logo /></header>
       <main>
         {inviteError && <p className="error">{inviteError}</p>}
+        {tab === 'feed' && isCoach && <Feed me={profile} />}
         {tab === 'athletes' && <Athletes />}
         {tab === 'athlete' && isCoach && <AthleteCard id={route[1]} />}
         {tab === 'plan' && isCoach && <Plan athleteId={route[1]} week={route[2]} open={route[3]} me={profile} />}
