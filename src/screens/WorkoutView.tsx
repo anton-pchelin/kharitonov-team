@@ -6,6 +6,7 @@ import { fmtNum, fmtTime, parseNum, parseTime } from '../lib/format'
 import { itemLabels, resultLabel, type ResultType, type Workout, type WorkoutItem } from '../lib/workout'
 import { previousSets, type Comment, type PastSet, type SetResult } from '../lib/offline'
 import { exerciseKey, isRecordSet, maxFor, pctWeight, type MaxRecord } from '../lib/progress'
+import { platesFor } from '../lib/plates'
 
 export type ViewProps = {
   workout: Workout
@@ -15,6 +16,7 @@ export type ViewProps = {
   me: string
   names: Record<string, string>
   editable: boolean
+  gym?: { bar: number; plates: number[] }  // гриф и блины атлета — для калькулятора 🏋
   maxes?: MaxRecord[]  // рекорды вручную; нет — это экран тренера, показываем только «70% от 1ПМ»
   onMax?: (item: WorkoutItem, weight: number) => void
   onSet?: (r: SetResult) => void
@@ -96,6 +98,7 @@ function ItemView(p: ViewProps & { item: WorkoutItem; label: string; note: strin
       {item.result_type !== 'check' && Array.from({ length: rows }, (_, k) => k + 1).map((n) => (
         <SetRow key={n} n={n} type={item.result_type} value={mine.find((r) => r.set_no === n)} hint={prev.find((r) => r.set_no === n)}
           record={isRecordSet(mine.find((r) => r.set_no === n)?.weight, mine.find((r) => r.set_no === n)?.reps, earlier)}
+          gym={p.gym} pctKg={item.pct != null && p.maxes ? (() => { const m = maxFor(item, p.history, p.maxes); return m ? pctWeight(item.pct, m) : null })() : null}
           editable={p.editable} onPut={(patch) => put(n, patch)} />
       ))}
       {item.result_type !== 'check' && prev.length > 0 && (
@@ -124,11 +127,13 @@ function PctHint(p: ViewProps & { item: WorkoutItem }) {
   )
 }
 
-function SetRow({ n, type, value, hint, record, editable, onPut }: {
+function SetRow({ n, type, value, hint, record, editable, onPut, gym, pctKg }: {
   n: number; type: ResultType; value?: SetResult; hint?: SetResult; record: boolean; editable: boolean; onPut: (p: Partial<SetResult>) => void
+  gym?: { bar: number; plates: number[] }; pctKg?: number | null
 }) {
   const fields = FIELDS[type]
   const [draft, setDraft] = useState<Partial<Record<Field, string>>>({})
+  const [calc, setCalc] = useState(false)
   const text = (f: Field) => draft[f] ?? show(f, value?.[f])
   const commit = (f: Field) => {
     if (draft[f] === undefined) return
@@ -147,8 +152,10 @@ function SetRow({ n, type, value, hint, record, editable, onPut }: {
             onChange={(e) => setDraft((d) => ({ ...d, [f]: e.target.value }))}
             onBlur={() => commit(f)} onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()} />
           {f === 'weight' && <span className="muted">кг</span>}
+          {f === 'weight' && gym && <button type="button" className="plate-btn" aria-label="Какие блины повесить" onClick={() => setCalc(!calc)}>🏋</button>}
         </span>
       ))}
+      {calc && gym && <Plates weight={parseNum(draft.weight ?? '') ?? value?.weight ?? hint?.weight ?? pctKg ?? null} gym={gym} />}
       <button className={'round-check' + (value?.done ? ' on' : '')} disabled={!editable} aria-label={`Подход ${n} выполнен`}
         onClick={() => {
           // ✓ на пустом подходе берёт подсказку «прошлый раз» — как в TRNR
@@ -218,4 +225,20 @@ function CommentVideo({ path }: { path: string }) {
     supabase.storage.from('videos').createSignedUrl(path, 3600).then(({ data }) => setUrl(data?.signedUrl ?? ''))
   }, [path])
   return url ? <video className="comment-video" src={url} controls playsInline preload="metadata" /> : <small className="muted"> 🎬 загрузка видео…</small>
+}
+
+/** Калькулятор блинов: что повесить на каждую сторону грифа. */
+function Plates({ weight, gym }: { weight: number | null; gym: { bar: number; plates: number[] } }) {
+  const [bar, setBar] = useState(gym.bar)
+  if (!weight) return <div className="plates muted">Введите вес — покажу, какие блины повесить.</div>
+  const r = platesFor(Number(weight), bar, gym.plates)
+  return (
+    <div className="plates">
+      <div className="segmented">
+        {[20, 15, 10].map((b) => <button key={b} type="button" className={bar === b ? 'active' : ''} onClick={() => setBar(b)}>гриф {b}</button>)}
+      </div>
+      <b>{r.perSide.length ? r.perSide.map(fmtNum).join(' + ') + ' на каждую сторону' : 'только гриф'}</b>
+      {r.diff !== 0 && <span className="muted"> — выйдет {fmtNum(r.got)} кг ({r.diff > 0 ? 'меньше' : 'больше'} на {fmtNum(Math.abs(r.diff))})</span>}
+    </div>
+  )
 }

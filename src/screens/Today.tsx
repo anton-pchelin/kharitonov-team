@@ -5,6 +5,8 @@ import { loadExercises } from './Exercises'
 import { WorkoutView, progress } from './WorkoutView'
 import { OfflineStore } from '../lib/offline'
 import { prepareVideo, putBlob } from '../lib/videoUpload'
+import { Timer } from './Timer'
+import type { WorkoutItem } from '../lib/workout'
 import { addDays, fmtDay, today } from '../lib/dates'
 import { fmtNum } from '../lib/format'
 import { RESULT_TYPES, type ResultType, type Workout } from '../lib/workout'
@@ -23,6 +25,7 @@ export function Today({ profile, date: routeDate }: { profile: Profile; date?: s
   const data = useSyncExternalStore(store.subscribe, store.getSnapshot)
   const [exercises, setExercises] = useState<Exercise[]>([])
   const [coachName, setCoachName] = useState('Тренер')
+  const [timer, setTimer] = useState<WorkoutItem | null>(null)
   const date = routeDate ?? today()
   const go = (d: string) => { location.hash = `#/today/${d}` }
 
@@ -61,6 +64,8 @@ export function Today({ profile, date: routeDate }: { profile: Profile; date?: s
         <div key={w.id}>
           <WorkoutView workout={w} results={data.results} comments={data.comments} history={data.history}
             me={profile.id} names={names} editable={editable} maxes={data.records ?? []}
+            gym={{ bar: profile.bar ?? 20, plates: profile.plates ?? [25, 20, 15, 10, 5, 2.5, 1.25] }}
+            extra={(item) => item.timer?.kind && editable && <button className="btn small" onClick={() => setTimer(item)}>▶ Таймер</button>}
             onMax={(item, weight) => store.do({ t: 'record', row: { id: crypto.randomUUID(), athlete_id: profile.id, exercise_id: item.exercise_id, name: item.name, weight, reps: 1 } })}
             onSet={(row) => store.do({ t: 'set', row })}
             onUnset={(item_id, set_no) => store.do({ t: 'unset', item_id, set_no })}
@@ -80,6 +85,10 @@ export function Today({ profile, date: routeDate }: { profile: Profile; date?: s
       ))}
 
       {editable && <AddOwnWorkout onAdd={addOwnWorkout} />}
+      {timer?.timer && (
+        <Timer id={timer.id} cfg={timer.timer} title={timer.name} onClose={() => setTimer(null)}
+          onResult={(r) => store.do({ t: 'set', row: { ...(data.results.find((x) => x.item_id === timer.id && x.set_no === 1) ?? {}), item_id: timer.id, set_no: 1, ...r } })} />
+      )}
     </>
   )
 }

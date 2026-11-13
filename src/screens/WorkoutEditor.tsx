@@ -6,6 +6,7 @@ import { supabase } from '../supabase'
 import { searchExercises, type Exercise } from '../search'
 import { fmtDay } from '../lib/dates'
 import { RESULT_TYPES, isGroupStart, itemLabels, type ResultType, type Workout, type WorkoutItem } from '../lib/workout'
+import { TIMER_KINDS, type TimerCfg } from '../lib/timer'
 
 type Suggestion = {
   name: string
@@ -210,6 +211,24 @@ function ItemRow({ item, label, groupStart, inGroup, hasNext, onChange, onMenu }
         <button type="button" onClick={list}>• список</button>
       </div>
       <textarea ref={plan} rows={2} placeholder="Текст плана" value={item.plan_text} onChange={(e) => onChange({ plan_text: e.target.value })} />
+      <div className="row timer-row">
+        <select value={item.timer?.kind ?? ''} aria-label="Таймер комплекса" onChange={(e) => {
+          const kind = e.target.value as TimerCfg['kind'] | ''
+          // таймер сам подставит результат: круги для АМРАП, время для «на время»
+          onChange(kind ? { timer: kind === 'tabata' ? { kind, work: 20, rest: 10, rounds: 8 } : { kind, minutes: item.timer?.minutes ?? 12 },
+            ...(kind === 'amrap' ? { result_type: 'rounds' as const } : kind === 'fortime' ? { result_type: 'time' as const } : {}) } : { timer: null })
+        }}>
+          <option value="">без таймера</option>
+          {TIMER_KINDS.map(([k, l]) => <option key={k} value={k}>Таймер: {l}</option>)}
+        </select>
+        {item.timer && item.timer.kind !== 'tabata' && (
+          <label className="pct-input">
+            <input inputMode="numeric" value={item.timer.minutes ?? ''} aria-label="Минут"
+              onChange={(e) => onChange({ timer: { ...item.timer!, minutes: Number(e.target.value) || undefined } })} />
+            <span className="muted">мин</span>
+          </label>
+        )}
+      </div>
       <input type="url" inputMode="url" placeholder="Видео: ссылка Rutube / VK / YouTube" value={item.video_url ?? ''}
         onChange={(e) => onChange({ video_url: e.target.value || null })} />
       <div className="row">

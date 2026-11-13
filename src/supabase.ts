@@ -24,4 +24,6 @@ export type Profile = {
   notify_replies: boolean
   notify_completed: boolean
   notify_comments: boolean
+  bar: number
+  plates: number[]
 }

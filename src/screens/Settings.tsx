@@ -49,6 +49,7 @@ export function Settings({ profile, onChange }: { profile: Profile; onChange: (p
         </label>
       ))}
       <p className="muted">Сообщения не приходят? Откройте бота <a href="https://t.me/kharitonov_team_bot" target="_blank" rel="noreferrer">@kharitonov_team_bot</a> и нажмите «Start».</p>
+      {profile.role === 'athlete' && <GymSettings profile={profile} onChange={onChange} />}
       {profile.role === 'coach' && <StorageUsage />}
       <InstallHint />
       <p className="muted">{profile.name} · {profile.email} · {profile.role === 'coach' ? 'тренер' : 'атлет'}</p>
@@ -71,6 +72,25 @@ function StorageUsage() {
         Фото и видео атлетов: {mb(used)} МБ из {mb(LIMIT)} МБ
         {used > LIMIT * 0.9 && ' — место почти закончилось. Видео старше 30 дней удаляются сами.'}
       </p>
+    </>
+  )
+}
+
+/** Гриф и набор блинов — для калькулятора 🏋 в поле веса. */
+function GymSettings({ profile, onChange }: { profile: Profile; onChange: (p: Partial<Profile>) => Promise<void> }) {
+  const [text, setText] = useState((profile.plates ?? []).join('; ').replaceAll('.', ','))
+  return (
+    <>
+      <h3>Гриф и блины</h3>
+      <div className="segmented">
+        {[20, 15, 10].map((b) => <button key={b} className={profile.bar === b ? 'active' : ''} onClick={() => onChange({ bar: b })}>гриф {b} кг</button>)}
+      </div>
+      <label>Блины в зале (через «;»)
+        <input value={text} onChange={(e) => setText(e.target.value)} onBlur={() => {
+          const plates = text.split(';').map((s) => Number(s.trim().replace(',', '.'))).filter((n) => n > 0 && n <= 50)
+          if (plates.length) onChange({ plates })
+        }} />
+      </label>
     </>
   )
 }

@@ -1,3 +1,5 @@
+import type { TimerCfg } from './timer'
+
 export type ResultType = 'weight_reps' | 'reps' | 'weight' | 'time' | 'meters' | 'calories' | 'rounds' | 'check'
 
 export const RESULT_TYPES: [ResultType, string][] = [
@@ -26,6 +28,7 @@ export type WorkoutItem = {
   block_note: string
   self?: boolean
   pct?: number | null  // % от 1ПМ этого упражнения
+  timer?: TimerCfg | null  // таймер комплекса (АМРАП, EMOM, на время, табата)
 }
 
 export type Workout = {

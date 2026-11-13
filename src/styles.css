@@ -229,3 +229,17 @@ label.btn { display: flex; align-items: center; justify-content: center; color: 
 .avatar { width: 40px; height: 40px; flex: none; border-radius: 50%; display: grid; place-items: center; background: var(--secondary); color: var(--on-secondary); font-weight: 800; }
 .missed { color: #B3261E; font-weight: 600; }
 .storage-warn { padding: 12px 14px; border-radius: var(--radius); background: #FDE2E1; color: #8A1C17; }
+
+/* Этап 8: таймер и блины */
+.timer { position: fixed; inset: 0; z-index: 50; display: flex; flex-direction: column; gap: 12px; padding: calc(env(safe-area-inset-top) + 16px) 16px calc(env(safe-area-inset-bottom) + 16px); background: var(--bg); overflow-y: auto; }
+.timer-face { flex: 1; min-height: 240px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; border-radius: var(--radius); background: var(--card); border: 1px solid var(--line); }
+.timer-face.work { background: var(--done-bg); }
+.timer-face.rest { background: var(--secondary); color: var(--on-secondary); }
+.timer-big { font-size: clamp(4rem, 22vw, 9rem); font-weight: 800; font-variant-numeric: tabular-nums; line-height: 1; }
+.timer-phase { font-size: 1.4rem; font-weight: 700; }
+.timer-rounds { text-align: center; font-size: 1.3rem; margin: 0; }
+.timer-btn { min-height: 72px; font-size: 1.4rem; }
+.timer-row select { flex: 1; }
+.plate-btn { flex: none; min-width: 40px; min-height: 40px; border: 0; border-radius: 10px; background: var(--secondary); cursor: pointer; }
+.plates { flex-basis: 100%; display: flex; flex-direction: column; gap: 6px; padding: 8px; border-radius: 12px; background: var(--card); border: 1px solid var(--line); }
+.set-row { flex-wrap: wrap; }

@@ -137,3 +137,32 @@ describe('% от максимума', async () => {
     expect(maxFor(item, [], [])).toBeNull()
   })
 })
+
+describe('в зале', async () => {
+  const { platesFor } = await import('./lib/plates')
+  const { timerState } = await import('./lib/timer')
+  const set = [25, 20, 15, 10, 5, 2.5, 1.25]
+
+  it('72,5 кг на гриф 20 — «25 + 1,25» на сторону', () => {
+    expect(platesFor(72.5, 20, set)).toEqual({ perSide: [25, 1.25], got: 72.5, diff: 0 })
+    expect(platesFor(100, 20, set).perSide).toEqual([25, 15])
+  })
+  it('не собирается точно — ближайший меньший и разница', () => {
+    expect(platesFor(73, 20, set)).toEqual({ perSide: [25, 1.25], got: 72.5, diff: 0.5 })
+    expect(platesFor(15, 20, set)).toEqual({ perSide: [], got: 20, diff: -5 })
+  })
+  it('табата: 8 раундов 20/10, время от старта, а не тиками', () => {
+    const tab = { kind: 'tabata' as const }
+    expect(timerState(tab, 1000).phase).toBe('countdown')
+    expect(timerState(tab, 3000 + 5000)).toMatchObject({ phase: 'work', round: 1, left: 15 })
+    expect(timerState(tab, 3000 + 25000)).toMatchObject({ phase: 'rest', round: 1, left: 5 })
+    // «заблокировали» на 30 с посреди 3-го раунда — состояние то же, что и без блокировки
+    expect(timerState(tab, 3000 + 65000)).toMatchObject({ phase: 'work', round: 3, left: 15 })
+    expect(timerState(tab, 3000 + 240000).phase).toBe('done')
+  })
+  it('АМРАП 12 и EMOM 10', () => {
+    expect(timerState({ kind: 'amrap', minutes: 12 }, 3000 + 60000)).toMatchObject({ phase: 'work', left: 660 })
+    expect(timerState({ kind: 'amrap', minutes: 12 }, 3000 + 720000).phase).toBe('done')
+    expect(timerState({ kind: 'emom', minutes: 10 }, 3000 + 125000)).toMatchObject({ round: 3, left: 55 })
+  })
+})
