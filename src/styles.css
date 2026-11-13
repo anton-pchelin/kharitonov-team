@@ -243,3 +243,96 @@ label.btn { display: flex; align-items: center; justify-content: center; color: 
 .plate-btn { flex: none; min-width: 40px; min-height: 40px; border: 0; border-radius: 10px; background: var(--secondary); cursor: pointer; }
 .plates { flex-basis: 100%; display: flex; flex-direction: column; gap: 6px; padding: 8px; border-radius: 12px; background: var(--card); border: 1px solid var(--line); }
 .set-row { flex-wrap: wrap; }
+
+/* ── Оформление в духе macOS: боковое меню на ПК, вкладки с иконками на телефоне ── */
+:root { font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI Variable Text', 'Segoe UI', system-ui, Roboto, sans-serif; letter-spacing: -0.01em; }
+.side { display: none; }
+.icon { flex: none; }
+.page-title { font-size: 1.7rem; font-weight: 700; letter-spacing: -0.02em; margin: 4px 0 16px; }
+.top, .tabs { background: color-mix(in srgb, var(--card) 82%, transparent); backdrop-filter: blur(20px) saturate(1.6); -webkit-backdrop-filter: blur(20px) saturate(1.6); }
+.tabs a { display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 8px 2px 10px; font-size: 0.7rem; }
+.tabs a.active { color: var(--text); box-shadow: none; }
+.tabs a.active .icon { box-sizing: content-box; padding: 3px 14px; border-radius: 999px; background: var(--primary); color: var(--on-primary); }
+.avatar.small { width: 32px; height: 32px; font-size: 0.8rem; }
+
+/* сгруппированные строки, как в «Системных настройках» */
+.group { background: var(--card); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+.group-title { margin: 20px 4px 8px; font-size: 0.85rem; font-weight: 600; color: var(--muted); }
+.group-note { margin: 8px 4px; font-size: 0.85rem; }
+.set-line { display: flex; flex-direction: row; align-items: center; justify-content: space-between; gap: 16px; min-height: 52px; padding: 10px 16px; border-bottom: 1px solid var(--line); color: var(--text); font-size: 1rem; }
+.set-line:last-child { border-bottom: 0; }
+.set-line .note { flex: 1; margin: 0; }
+.set-label { display: flex; flex-direction: column; gap: 2px; }
+.set-label small { font-size: 0.8rem; }
+.set-control { flex: 0 1 auto; display: flex; justify-content: flex-end; }
+.set-control .btn { margin: 0; }
+.settings-nav { display: none; }
+.meter { height: 6px; margin: 0 16px 14px; border-radius: 3px; background: var(--secondary); overflow: hidden; }
+.meter span { display: block; height: 100%; background: var(--primary); }
+/* переключатель вместо галочки */
+.toggle { appearance: none; -webkit-appearance: none; flex: none; position: relative; width: 46px !important; height: 28px; min-height: 0 !important; padding: 0; border: 0; border-radius: 14px; background: var(--secondary); cursor: pointer; transition: background 0.2s; }
+.toggle::after { content: ''; position: absolute; top: 3px; left: 3px; width: 22px; height: 22px; border-radius: 50%; background: #FFFFFF; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3); transition: transform 0.2s; }
+.toggle:checked { background: var(--primary); }
+.toggle:checked::after { transform: translateX(18px); }
+.toggle:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+
+/* неделя тренера: колонки по ширине области, а не окна (на ПК рядом боковое меню) */
+.app > main { container-type: inline-size; }
+@container (max-width: 760px) { .week { grid-template-columns: 1fr; } }
+@container (min-width: 761px) { .week { grid-template-columns: repeat(7, minmax(0, 1fr)); } }
+
+@media (min-width: 900px) {
+  :root { font-size: 15px; }
+  .app { display: grid; grid-template-columns: 240px minmax(0, 1fr); min-height: 100vh; }
+  .app > .top, .app > .tabs { display: none; }
+  .side { display: flex; flex-direction: column; gap: 18px; position: sticky; top: 0; height: 100vh; padding: 20px 12px 16px; background: color-mix(in srgb, var(--bg) 75%, var(--line)); border-right: 1px solid var(--line); }
+  .side .logo { padding: 0 8px; }
+  .side nav { display: flex; flex-direction: column; gap: 2px; }
+  .side nav a, .settings-nav button { display: flex; align-items: center; gap: 10px; padding: 7px 10px; border: 0; border-radius: 8px; background: none; font: inherit; font-weight: 500; color: var(--text); text-align: left; text-decoration: none; cursor: pointer; }
+  .side nav a:hover, .settings-nav button:hover { background: color-mix(in srgb, var(--text) 7%, transparent); }
+  .side nav a.active, .settings-nav button.active { background: var(--primary); color: var(--on-primary); }
+  .side-foot { margin-top: auto; display: flex; align-items: center; gap: 10px; padding: 8px; }
+  .side-foot > span:last-child { display: flex; flex-direction: column; line-height: 1.25; font-weight: 600; }
+  .app > main, main:has(.week) { max-width: 1120px; width: 100%; margin: 0 auto; padding: 28px 40px 48px; }
+  main > form, main > .card, .own-form { max-width: 680px; }
+
+  /* плотнее, как в настольных приложениях: мышь точнее пальца */
+  input, textarea, select { min-height: 36px; padding: 7px 10px; border-radius: 8px; }
+  .btn { min-height: 38px; padding: 8px 18px; border-radius: 10px; }
+  .btn.small { min-height: 32px; padding: 6px 12px; font-weight: 600; }
+  .card { border-radius: 12px; }
+  .segmented button { min-height: 30px; }
+  .round-check { width: 34px; height: 34px; }
+  .set-field input { min-height: 36px; }
+  .stepper button { width: 32px; height: 32px; font-size: 1.1rem; }
+  .chip { min-height: 32px; padding: 5px 12px; }
+  .ex-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 8px; }
+  .ex-list .card { margin: 0; }
+  .workout, .comments { max-width: 760px; }
+  .palettes { grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); }
+
+  /* настройки: разделы слева, выбранный — справа */
+  .settings-body { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 32px; align-items: start; }
+  .settings-nav { display: flex; flex-direction: column; gap: 2px; position: sticky; top: 28px; }
+  .settings-pane { max-width: 680px; }
+  .settings-pane > section:not(.active) { display: none; }
+  .settings-pane > section > .group-title:first-child { margin-top: 0; font-size: 1.3rem; font-weight: 700; color: var(--text); }
+  .set-line { min-height: 44px; padding: 8px 14px; font-size: 0.95rem; }
+}
+.segmented button { white-space: nowrap; padding: 0 12px; }
+@media (min-width: 900px) {
+  main:has(.week) { max-width: none; }  /* неделе тренера — вся ширина окна */
+  .palette { border-width: 1px; }
+}
+@media (max-width: 899px) {
+  /* на телефоне переключатель уходит под подпись, а не за край экрана */
+  .set-line { flex-wrap: wrap; }
+  .set-control:has(.segmented, input:not(.toggle)) { flex: 1 1 100%; }
+  .set-control .segmented { width: 100%; }
+}
+@media (max-width: 899px) {
+  /* инструменты недели — одной строкой с прокруткой, а не стопкой на пол-экрана */
+  .plan-tools { flex-wrap: nowrap; overflow-x: auto; padding-bottom: 4px; scrollbar-width: none; }
+  .plan-tools > * { flex: none; white-space: nowrap; }
+  .plan-tools .remind-now { flex-wrap: nowrap; }
+}

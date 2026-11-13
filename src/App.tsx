@@ -13,6 +13,7 @@ import { Today } from './screens/Today'
 import { Progress } from './screens/Progress'
 import { Programs } from './screens/Programs'
 import { Feed } from './screens/Feed'
+import { Icon, type IconName } from './lib/icons'
 
 const INVITE_KEY = 'inviteToken'
 
@@ -118,14 +119,31 @@ export function App() {
     )
   }
 
-  const tabs = isCoach
+  const tabs: [IconName, string][] = isCoach
     ? [['feed', 'Лента'], ['athletes', 'Атлеты'], ['plan', 'План'], ['exercises', 'Упражнения'], ['settings', 'Настройки']]
     : [['today', 'Тренировки'], ['progress', 'Прогресс'], ['exercises', 'Упражнения'], ['settings', 'Настройки']]
   const tab = tabs.some(([k]) => k === route[0]) || ['athlete', 'progress', 'profile', 'programs'].includes(route[0]) ? route[0] : tabs[0][0]
 
+  const isActive = (k: string) => tab === k || (['athlete', 'progress'].includes(tab) && k === 'athletes' && isCoach)
+    || (tab === 'programs' && k === 'plan') || (tab === 'profile' && k === 'settings')
+  const links = tabs.map(([k, label]) => (
+    <a key={k} href={`#/${k}`} className={isActive(k) ? 'active' : ''} aria-current={isActive(k) ? 'page' : undefined}>
+      <Icon name={k} /><span>{label}</span>
+    </a>
+  ))
+
   return (
-    <div className="page">
+    <div className="page app">
       <header className="top"><Logo /></header>
+      {/* на ПК — боковое меню, на телефоне — вкладки внизу */}
+      <aside className="side">
+        <Logo />
+        <nav aria-label="Разделы">{links}</nav>
+        <div className="side-foot">
+          <span className="avatar small">{(profile.name || '?').split(/\s+/).map((w) => w[0]).join('').slice(0, 2).toUpperCase()}</span>
+          <span>{profile.name}<small className="muted">{isCoach ? 'тренер' : 'атлет'}</small></span>
+        </div>
+      </aside>
       <main>
         {inviteError && <p className="error">{inviteError}</p>}
         {tab === 'feed' && isCoach && <Feed me={profile} />}
@@ -139,11 +157,7 @@ export function App() {
         {tab === 'exercises' && <Exercises canEdit={isCoach} />}
         {tab === 'settings' && <Settings profile={profile} onChange={update} />}
       </main>
-      <nav className="tabs">
-        {tabs.map(([k, label]) => (
-          <a key={k} href={`#/${k}`} className={tab === k || (['athlete', 'progress'].includes(tab) && k === 'athletes') || (tab === 'programs' && k === 'plan') || (tab === 'profile' && k === 'settings') ? 'active' : ''}>{label}</a>
-        ))}
-      </nav>
+      <nav className="tabs" aria-label="Разделы">{links}</nav>
     </div>
   )
 }

@@ -88,12 +88,12 @@ export function Plan({ athleteId, week, open, me }: { athleteId?: string; week?:
           <span>{fmtShort(monday)} — {fmtShort(addDays(monday, 6))}</span>
           <button className="btn small secondary" onClick={() => go(athlete.id, addDays(monday, 7))} aria-label="Следующая неделя">→</button>
         </div>
-        <RemindNow />
       </div>
       <div className="plan-tools">
         <button className="btn small secondary" onClick={() => setTool(tool === 'copy' ? null : 'copy')}>Копировать неделю</button>
         <button className="btn small secondary" onClick={() => setTool(tool === 'assign' ? null : 'assign')}>Назначить программу</button>
         <a className="btn small secondary" href="#/programs">Шаблоны и программы</a>
+        <RemindNow />
       </div>
       {tool === 'copy' && <CopyWeek athlete={athlete} monday={monday} athletes={athletes} onDone={() => { setTool(null); reload() }} />}
       {tool === 'assign' && <AssignProgram athlete={athlete} monday={monday} athletes={athletes} onDone={() => { setTool(null); reload() }} />}

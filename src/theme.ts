@@ -7,8 +7,8 @@ export type ThemeMode = 'light' | 'dark' | 'system'
 type Palette = [string, string, string, string, string, string]
 
 export const PALETTES: Record<string, Palette> = {
-  'TRNR': ['#FFD43B', '#1A1A1A', '#EDEDED', '#333333', '#FAFAFA', '#212121'],
-  'TRNR мягкий': ['#FFE38A', '#4A3A00', '#E8E4DA', '#4A4334', '#FFFDF6', '#3A3526'],
+  'Классика': ['#FFD43B', '#1A1A1A', '#EDEDED', '#333333', '#FAFAFA', '#212121'],
+  'Классика мягкая': ['#FFE38A', '#4A3A00', '#E8E4DA', '#4A4334', '#FFFDF6', '#3A3526'],
   'Мята': ['#8FD3B6', '#1F4A3A', '#FFD9C2', '#6B3A1F', '#F6FBF8', '#2F4A3F'],
   'Лаванда': ['#BCAEF0', '#2E2560', '#F8CFE0', '#6A2343', '#F8F6FD', '#3A3358'],
   'Небо': ['#9CCAF0', '#163A5C', '#F9E9A6', '#5C4A0E', '#F4F8FD', '#23405C'],
@@ -24,7 +24,7 @@ export const PALETTES: Record<string, Palette> = {
   'Персик': ['#FFC4A8', '#5E2A12', '#D8CCF2', '#352866', '#FFF8F5', '#553326'],
   'Ваниль': ['#F3E3B5', '#4A3D12', '#D5D9E0', '#2E3440', '#FBFAF6', '#2E3440'],
 }
-export const DEFAULT_PALETTE = 'TRNR'
+export const DEFAULT_PALETTE = 'Классика'
 
 /** a·share + b·(1−share), цвета в виде #RRGGBB */
 export function mix(a: string, share: number, b: string): string {

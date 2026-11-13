@@ -158,7 +158,7 @@ function SetRow({ n, type, value, hint, record, editable, onPut, gym, pctKg }: {
       {calc && gym && <Plates weight={parseNum(draft.weight ?? '') ?? value?.weight ?? hint?.weight ?? pctKg ?? null} gym={gym} />}
       <button className={'round-check' + (value?.done ? ' on' : '')} disabled={!editable} aria-label={`Подход ${n} выполнен`}
         onClick={() => {
-          // ✓ на пустом подходе берёт подсказку «прошлый раз» — как в TRNR
+          // ✓ на пустом подходе берёт подсказку «прошлый раз»
           const filled = Object.fromEntries(fields.map((f) => [f, value?.[f] ?? (draft[f] ? parse(f, draft[f]!) : hint?.[f] ?? null)]))
           onPut({ ...filled, done: !value?.done })
           setDraft({})
