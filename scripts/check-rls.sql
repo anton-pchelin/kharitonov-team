@@ -29,6 +29,17 @@ begin
 
   select role into t from public.profiles where id = coach1;
   assert t = 'coach', 'адрес из списка не стал тренером';
+
+  -- Вход через Telegram: тренер по нику из списка, ник в user_metadata роли не даёт
+  insert into public.coach_telegram_usernames values ('rls_coach_test');
+  insert into auth.users (id, email, raw_app_meta_data) values
+    (gen_random_uuid(), 'tg-coach-' || mail1, '{"telegram_id": 990000001, "telegram_username": "RLS_Coach_Test", "name": "Тренер Тест"}');
+  select role || '|' || name || '|' || coalesce(email, '-') into t from public.profiles where telegram_id = 990000001;
+  assert t = 'coach|Тренер Тест|-', 'Telegram-тренер создан неверно: ' || coalesce(t, 'нет профиля');
+  insert into auth.users (id, email, raw_user_meta_data) values
+    (gen_random_uuid(), 'tg-fake-' || mail1, '{"telegram_id": 990000002, "telegram_username": "rls_coach_test"}');
+  select role into t from public.profiles where email = 'tg-fake-' || mail1;
+  assert t = 'athlete', 'подделка через user_metadata дала роль тренера';
   select role into t from public.profiles where id = a1;
   assert t = 'athlete', 'обычный адрес должен быть атлетом';
 
