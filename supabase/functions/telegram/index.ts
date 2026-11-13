@@ -110,6 +110,27 @@ async function check(code: string) {
   return json({ status: 'ok', token_hash: link.data.properties.hashed_token })
 }
 
+/** Отправить очередь уведомлений (её наполняют триггеры базы). Ошибку Telegram записываем, не повторяем. */
+async function flush(): Promise<number> {
+  const { data: todo } = await db.from('notifications').select('id').is('sent_at', null).order('id').limit(50)
+  if (!todo?.length) return 0
+  // «забираем» строки отметкой sent_at — параллельный вызов (cron + кнопка тренера) их уже не возьмёт
+  const { data } = await db.from('notifications').update({ sent_at: new Date().toISOString() })
+    .in('id', todo.map((t) => t.id)).is('sent_at', null).select('id, text, link, profiles!inner(telegram_id)')
+  let sent = 0
+  for (const n of (data ?? []) as unknown as { id: number; text: string; link: string | null; profiles: { telegram_id: number } }[]) {
+    const r = await tg('sendMessage', {
+      chat_id: n.profiles.telegram_id,
+      text: n.text,
+      ...(n.link ? { reply_markup: { inline_keyboard: [[{ text: 'Открыть', url: SITE + n.link }]] } } : {}),
+    })
+    // 403 — человек остановил бота; приложение подскажет «откройте бота и нажмите Start»
+    if (r.ok) sent++
+    else await db.from('notifications').update({ error: r.description ?? 'ошибка' }).eq('id', n.id)
+  }
+  return sent
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response(null, { headers: cors })
   try {
@@ -131,6 +152,19 @@ Deno.serve(async (req) => {
       return json({ code, bot: botUsername })
     }
     if (body.action === 'check' && typeof body.code === 'string') return await check(body.code)
+    // pg_cron раз в минуту: напоминания на завтра (в 20:00 у атлета) и отправка очереди
+    if (body.action === 'cron' && SECRET && body.secret === SECRET) {
+      await db.rpc('enqueue_reminders')
+      return json({ sent: await flush() })
+    }
+    // Кнопка тренера «Отправить напоминания сейчас» — только его атлетам, без учёта часа
+    if (body.action === 'remind_now') {
+      const { data: auth } = await db.auth.getUser(req.headers.get('authorization')?.replace('Bearer ', '') ?? '')
+      const { data: me } = auth.user ? await db.from('profiles').select('role').eq('id', auth.user.id).single() : { data: null }
+      if (me?.role !== 'coach') return json({ error: 'только для тренера' }, 403)
+      const { data: queued } = await db.rpc('enqueue_reminders', { p_coach: auth.user!.id })
+      return json({ queued, sent: await flush() })
+    }
     if (body.action === 'setup' && SECRET && body.secret === SECRET) {
       const url = `${Deno.env.get('SUPABASE_URL')}/functions/v1/telegram`
       return json(await tg('setWebhook', { url, secret_token: SECRET, allowed_updates: ['message', 'callback_query'] }))

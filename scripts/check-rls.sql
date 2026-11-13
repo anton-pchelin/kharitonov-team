@@ -265,6 +265,24 @@ begin
   exception when insufficient_privilege then null;
   end;
 
+  -- Уведомления (этап 4): очередь закрыта, рассылку руками не запустить
+  perform set_config('request.jwt.claims', json_build_object('sub', a1, 'role', 'authenticated')::text, true);
+  select count(*) into n from public.notifications;
+  assert n = 0, 'атлет видит очередь уведомлений';
+  update public.profiles set notify_tomorrow = false where id = a1;
+  get diagnostics n = row_count;
+  assert n = 1, 'атлет не смог выключить напоминания';
+  begin
+    perform public.enqueue_reminders(coach1);
+    assert false, 'атлет запустил рассылку напоминаний';
+  exception when insufficient_privilege then null;
+  end;
+  begin
+    perform public.notify(a1, 'спам', null);
+    assert false, 'атлет поставил сообщение в очередь';
+  exception when insufficient_privilege then null;
+  end;
+
   -- Без входа ничего не видно
   perform set_config('role', 'anon', true);
   perform set_config('request.jwt.claims', '{"role":"anon"}', true);

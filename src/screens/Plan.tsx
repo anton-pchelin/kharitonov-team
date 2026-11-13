@@ -18,12 +18,12 @@ export async function loadMyAthletes(): Promise<Athlete[]> {
 }
 
 /** Неделя атлета таблицей (7 колонок, на телефоне — список дней) + редактор тренировки под ней. */
-export function Plan({ athleteId, week, me }: { athleteId?: string; week?: string; me: { id: string; name: string } }) {
+export function Plan({ athleteId, week, open, me }: { athleteId?: string; week?: string; open?: string; me: { id: string; name: string } }) {
   const [athletes, setAthletes] = useState<Athlete[] | null>(null)
   const [exercises, setExercises] = useState<Exercise[]>([])
   const [workouts, setWorkouts] = useState<Workout[]>([])
   const [editing, setEditing] = useState<{ date: string; workout: Workout | null } | null>(null)
-  const [viewing, setViewing] = useState<string | null>(null)
+  const [viewing, setViewing] = useState<string | null>(open ?? null)
   const [results, setResults] = useState<SetResult[]>([])
   const [comments, setComments] = useState<Comment[]>([])
   const monday = mondayOf(week ?? today())
@@ -53,7 +53,7 @@ export function Plan({ athleteId, week, me }: { athleteId?: string; week?: strin
   }, [athlete?.id, monday])
 
   useEffect(() => { reload() }, [reload])
-  useEffect(() => { setEditing(null); setViewing(null) }, [athlete?.id, monday])
+  useEffect(() => { setEditing(null); setViewing(open ?? null) }, [athlete?.id, monday, open])
 
   if (athletes === null) return <p className="muted">Загрузка…</p>
   if (!athlete) return <p className="muted">Пока нет атлетов. Пригласите кого-нибудь во вкладке «Атлеты».</p>
@@ -69,6 +69,7 @@ export function Plan({ athleteId, week, me }: { athleteId?: string; week?: strin
           <span>{fmtShort(monday)} — {fmtShort(addDays(monday, 6))}</span>
           <button className="btn small secondary" onClick={() => go(athlete.id, addDays(monday, 7))} aria-label="Следующая неделя">→</button>
         </div>
+        <RemindNow />
       </div>
 
       <div className="week">
@@ -109,6 +110,22 @@ export function Plan({ athleteId, week, me }: { athleteId?: string; week?: strin
           onSaved={() => { setEditing(null); reload() }} />
       )}
     </>
+  )
+}
+
+/** Проверка напоминаний: сразу шлёт атлетам тренера сообщения о завтрашних тренировках. */
+function RemindNow() {
+  const [msg, setMsg] = useState('')
+  const run = async () => {
+    setMsg('Отправляю…')
+    const { data, error } = await supabase.functions.invoke('telegram', { body: { action: 'remind_now' } })
+    setMsg(error ? 'Не получилось' : `Напоминаний: ${data.queued}, отправлено: ${data.sent}`)
+  }
+  return (
+    <span className="remind-now">
+      <button className="btn small secondary" onClick={run}>Отправить напоминания сейчас</button>
+      {msg && <small className="muted"> {msg}</small>}
+    </span>
   )
 }
 

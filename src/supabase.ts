@@ -19,4 +19,9 @@ export type Profile = {
   health_limits: string
   theme: ThemeMode
   palette: string
+  notify_tomorrow: boolean
+  notify_changed: boolean
+  notify_replies: boolean
+  notify_completed: boolean
+  notify_comments: boolean
 }

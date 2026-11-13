@@ -172,3 +172,8 @@ main:has(.week) { max-width: 1200px; }
 .comment-form { gap: 6px; }
 .own-form { display: flex; flex-direction: column; gap: 8px; }
 .tag-done { background: var(--primary); color: var(--on-primary); }
+
+/* Этап 4: уведомления */
+.switch { flex-direction: row; align-items: center; gap: 12px; min-height: 48px; color: var(--text); font-size: 1rem; }
+.switch input { width: 24px; min-height: 24px; height: 24px; accent-color: var(--primary); }
+.remind-now { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
