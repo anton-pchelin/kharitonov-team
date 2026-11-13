@@ -24,6 +24,7 @@ export function Settings({ profile, onChange }: { profile: Profile; onChange: (p
   return (
     <>
       <h2>Настройки</h2>
+      {profile.role === 'athlete' && <a className="btn secondary" href="#/profile">Моя анкета: цели, оборудование, здоровье</a>}
       <h3>Тема</h3>
       <div className="segmented">
         {MODES.map(([m, label]) => (

@@ -7,6 +7,7 @@ export type Exercise = {
   image_url: string | null
   video_url: string | null
   source: 'base' | 'coach' | 'athlete'
+  lower_is_better?: boolean
 }
 
 const norm = (s: string) => s.toLowerCase().replaceAll('ё', 'е')

@@ -14,7 +14,7 @@ export async function loadExercises(): Promise<Exercise[]> {
     for (let from = 0; ; from += PAGE) {
       const { data, error } = await supabase
         .from('exercises')
-        .select('id, name, aliases, muscles, equipment, image_url, video_url, source')
+        .select('id, name, aliases, muscles, equipment, image_url, video_url, source, lower_is_better')
         .order('name')
         .range(from, from + PAGE - 1)
       if (error) throw error
@@ -141,6 +141,17 @@ function ExerciseCard({ ex, canEdit, muscles, equipments, onBack, onSaved }: {
           )}
           {canEdit && <button className="btn secondary" onClick={() => setEditing(true)}>Изменить название или видео</button>}
           {canEdit && ex.image_url && <button className="btn secondary" onClick={removeImage}>Убрать картинку</button>}
+          {canEdit && (
+            <label className="switch">
+              <input type="checkbox" checked={!!ex.lower_is_better} onChange={async (e) => {
+                const { data, error } = await supabase.from('exercises').update({ lower_is_better: e.target.checked }).eq('id', ex.id).select().single()
+                if (error) setError('Не получилось: ' + error.message)
+                else onSaved(data as Exercise)
+              }} />
+              <span>Время: меньше — лучше (бег, а не планка)</span>
+            </label>
+          )}
+          {canEdit && <MergeInto ex={ex} onMerged={onBack} />}
           {error && <p className="error">{error}</p>}
         </>
       )}
@@ -169,5 +180,32 @@ function ExerciseCard({ ex, canEdit, muscles, equipments, onBack, onSaved }: {
         </form>
       )}
     </>
+  )
+}
+
+/** Объединить два названия одного упражнения: история и рекорды складываются в выбранное. */
+function MergeInto({ ex, onMerged }: { ex: Exercise; onMerged: () => void }) {
+  const [list, setList] = useState<Exercise[]>([])
+  const [q, setQ] = useState('')
+  const [open, setOpen] = useState(false)
+  useEffect(() => { if (open) loadExercises().then(setList) }, [open])
+  if (!open) return <button className="btn secondary" onClick={() => setOpen(true)}>Объединить с другим упражнением…</button>
+  const found = q ? searchExercises(list, q).filter((e) => e.id !== ex.id).slice(0, 6) : []
+  return (
+    <div className="card">
+      <p>«{ex.name}» исчезнет, его история перейдёт в выбранное упражнение.</p>
+      <input type="search" placeholder="Найти упражнение" value={q} onChange={(e) => setQ(e.target.value)} />
+      <div className="suggest">
+        {found.map((t) => (
+          <button key={t.id} onClick={async () => {
+            if (!confirm(`Объединить «${ex.name}» с «${t.name}»?`)) return
+            const { error } = await supabase.rpc('merge_exercises', { p_from: ex.id, p_to: t.id })
+            if (error) alert('Не получилось: ' + error.message)
+            else onMerged()
+          }}>{t.name}</button>
+        ))}
+      </div>
+      <button className="btn secondary" onClick={() => setOpen(false)}>Отмена</button>
+    </div>
   )
 }

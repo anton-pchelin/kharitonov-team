@@ -4,6 +4,7 @@ import { Video } from '../lib/video'
 import { fmtNum, fmtTime, parseNum, parseTime } from '../lib/format'
 import { itemLabels, resultLabel, type ResultType, type Workout, type WorkoutItem } from '../lib/workout'
 import { previousSets, type Comment, type PastSet, type SetResult } from '../lib/offline'
+import { exerciseKey, isRecordSet } from '../lib/progress'
 
 export type ViewProps = {
   workout: Workout
@@ -62,6 +63,7 @@ function ItemView(p: ViewProps & { item: WorkoutItem; label: string; note: strin
   const { item } = p
   const mine = p.results.filter((r) => r.item_id === item.id)
   const prev = previousSets(p.history, item, p.workout.date)
+  const earlier = p.history.filter((h) => h.date < p.workout.date && exerciseKey(h) === exerciseKey(item))
   const [extraRows, setExtraRows] = useState(0)
   const rows = Math.max(item.result_type === 'check' ? 1 : item.planned_sets, ...mine.map((r) => r.set_no), 1) + extraRows
 
@@ -88,6 +90,7 @@ function ItemView(p: ViewProps & { item: WorkoutItem; label: string; note: strin
       </div>
       {item.result_type !== 'check' && Array.from({ length: rows }, (_, k) => k + 1).map((n) => (
         <SetRow key={n} n={n} type={item.result_type} value={mine.find((r) => r.set_no === n)} hint={prev.find((r) => r.set_no === n)}
+          record={isRecordSet(mine.find((r) => r.set_no === n)?.weight, mine.find((r) => r.set_no === n)?.reps, earlier)}
           editable={p.editable} onPut={(patch) => put(n, patch)} />
       ))}
       {item.result_type !== 'check' && prev.length > 0 && (
@@ -101,8 +104,8 @@ function ItemView(p: ViewProps & { item: WorkoutItem; label: string; note: strin
   )
 }
 
-function SetRow({ n, type, value, hint, editable, onPut }: {
-  n: number; type: ResultType; value?: SetResult; hint?: SetResult; editable: boolean; onPut: (p: Partial<SetResult>) => void
+function SetRow({ n, type, value, hint, record, editable, onPut }: {
+  n: number; type: ResultType; value?: SetResult; hint?: SetResult; record: boolean; editable: boolean; onPut: (p: Partial<SetResult>) => void
 }) {
   const fields = FIELDS[type]
   const [draft, setDraft] = useState<Partial<Record<Field, string>>>({})
@@ -115,7 +118,7 @@ function SetRow({ n, type, value, hint, editable, onPut }: {
   }
   return (
     <div className={'set-row' + (value?.done ? ' done' : '')}>
-      <span className="set-no">{n}</span>
+      <span className="set-no">{record ? '🏆' : n}</span>
       {fields.map((f, i) => (
         <span key={f} className="set-field">
           {i > 0 && <span className="muted">×</span>}

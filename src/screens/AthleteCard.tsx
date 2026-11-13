@@ -32,7 +32,10 @@ export function AthleteCard({ id }: { id: string }) {
     <>
       <a href="#/athletes" className="back">← Атлеты</a>
       <h2>{p.name || p.email}</h2>
-      <a className="btn" href={`#/plan/${id}`}>План тренировок</a>
+      <div className="row">
+        <a className="btn" href={`#/plan/${id}`}>План тренировок</a>
+        <a className="btn secondary" href={`#/progress/${id}`}>Прогресс</a>
+      </div>
       <div className="card">
         {rows.map(([label, value]) => (
           <div key={label} className="field">

@@ -283,6 +283,40 @@ begin
   exception when insufficient_privilege then null;
   end;
 
+  -- Прогресс (этап 5): замеры, рекорды, фото — только атлет и его тренер
+  perform set_config('request.jwt.claims', json_build_object('sub', a1, 'role', 'authenticated')::text, true);
+  insert into public.measurements (athlete_id, kind, value) values (a1, 'Вес', 88);
+  insert into public.records (athlete_id, name, weight, reps) values (a1, 'Становая', 120, 1);
+  begin
+    insert into public.measurements (athlete_id, kind, value) values (a2, 'Вес', 1);
+    assert false, 'атлет записал замер другому';
+  exception when insufficient_privilege then null;
+  end;
+  begin
+    perform public.merge_exercises(base_id, base_id);
+    assert false, 'атлет объединил упражнения';
+  exception when insufficient_privilege then null;
+  end;
+  begin
+    insert into storage.objects (bucket_id, name) values ('progress', a2 || '/x.jpg');
+    assert false, 'атлет положил фото в чужую папку';
+  exception when insufficient_privilege then null;
+  end;
+  perform set_config('request.jwt.claims', json_build_object('sub', a2, 'role', 'authenticated')::text, true);
+  select count(*) into n from public.measurements where athlete_id = a1;
+  assert n = 0, 'атлет видит чужие замеры';
+  select count(*) into n from public.records where athlete_id = a1;
+  assert n = 0, 'атлет видит чужие рекорды';
+  perform set_config('request.jwt.claims', json_build_object('sub', coach1, 'role', 'authenticated')::text, true);
+  select count(*) into n from public.measurements where athlete_id = a1;
+  assert n = 1, 'тренер не видит замеры атлета';
+  delete from public.records where athlete_id = a1;
+  get diagnostics n = row_count;
+  assert n = 1, 'тренер не смог удалить ошибочный рекорд';
+  perform set_config('request.jwt.claims', json_build_object('sub', coach2, 'role', 'authenticated')::text, true);
+  select count(*) into n from public.measurements where athlete_id = a1;
+  assert n = 0, 'чужой тренер видит замеры';
+
   -- Без входа ничего не видно
   perform set_config('role', 'anon', true);
   perform set_config('request.jwt.claims', '{"role":"anon"}', true);

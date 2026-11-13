@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../supabase'
+import { addDays, today } from '../lib/dates'
 
 type Row = { athlete_id: string; profiles: { name: string; email: string | null; city: string } | null }
 
@@ -7,6 +8,17 @@ export function Athletes() {
   const [rows, setRows] = useState<Row[] | null>(null)
   const [link, setLink] = useState('')
   const [copied, setCopied] = useState(false)
+  const [pct, setPct] = useState<Record<string, string>>({})
+
+  useEffect(() => {
+    // % выполнения плана за неделю и месяц
+    Promise.all([7, 30].map((d) => supabase.rpc('completion_stats', { p_from: addDays(today(), -d) }))).then(([w, m]) => {
+      const f = (r: { athlete_id: string; planned: number; done: number }) => (r.planned ? Math.round((r.done / r.planned) * 100) + '%' : '—')
+      const week = Object.fromEntries(((w.data ?? []) as Parameters<typeof f>[0][]).map((r) => [r.athlete_id, f(r)]))
+      const month = Object.fromEntries(((m.data ?? []) as Parameters<typeof f>[0][]).map((r) => [r.athlete_id, f(r)]))
+      setPct(Object.fromEntries([...new Set([...Object.keys(week), ...Object.keys(month)])].map((id) => [id, `неделя ${week[id] ?? '—'} · месяц ${month[id] ?? '—'}`])))
+    })
+  }, [])
 
   useEffect(() => {
     supabase
@@ -56,7 +68,7 @@ export function Athletes() {
       {rows?.map((r) => (
         <a key={r.athlete_id} className="card link" href={`#/athlete/${r.athlete_id}`}>
           <b>{r.profiles?.name || r.profiles?.email}</b>
-          <span className="muted">{[r.profiles?.city, r.profiles?.email].filter(Boolean).join(' · ')}</span>
+          <span className="muted">{[pct[r.athlete_id], r.profiles?.city].filter(Boolean).join(' · ')}</span>
         </a>
       ))}
     </>

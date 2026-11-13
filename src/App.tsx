@@ -10,6 +10,7 @@ import { MyProfile } from './screens/MyProfile'
 import { Settings } from './screens/Settings'
 import { Plan } from './screens/Plan'
 import { Today } from './screens/Today'
+import { Progress } from './screens/Progress'
 
 const INVITE_KEY = 'inviteToken'
 
@@ -117,8 +118,8 @@ export function App() {
 
   const tabs = isCoach
     ? [['athletes', 'Атлеты'], ['plan', 'План'], ['exercises', 'Упражнения'], ['settings', 'Настройки']]
-    : [['today', 'Тренировки'], ['profile', 'Профиль'], ['exercises', 'Упражнения'], ['settings', 'Настройки']]
-  const tab = tabs.some(([k]) => k === route[0]) || route[0] === 'athlete' ? route[0] : tabs[0][0]
+    : [['today', 'Тренировки'], ['progress', 'Прогресс'], ['exercises', 'Упражнения'], ['settings', 'Настройки']]
+  const tab = tabs.some(([k]) => k === route[0]) || ['athlete', 'progress', 'profile'].includes(route[0]) ? route[0] : tabs[0][0]
 
   return (
     <div className="page">
@@ -129,13 +130,14 @@ export function App() {
         {tab === 'athlete' && isCoach && <AthleteCard id={route[1]} />}
         {tab === 'plan' && isCoach && <Plan athleteId={route[1]} week={route[2]} open={route[3]} me={profile} />}
         {tab === 'today' && !isCoach && <Today profile={profile} date={route[1]} />}
+        {tab === 'progress' && (isCoach ? route[1] && <Progress athleteId={route[1]} title="Прогресс атлета" /> : <Progress athleteId={profile.id} />)}
         {tab === 'profile' && <MyProfile profile={profile} onSave={update} />}
         {tab === 'exercises' && <Exercises canEdit={isCoach} />}
         {tab === 'settings' && <Settings profile={profile} onChange={update} />}
       </main>
       <nav className="tabs">
         {tabs.map(([k, label]) => (
-          <a key={k} href={`#/${k}`} className={tab === k || (tab === 'athlete' && k === 'athletes') ? 'active' : ''}>{label}</a>
+          <a key={k} href={`#/${k}`} className={tab === k || (['athlete', 'progress'].includes(tab) && k === 'athletes') || (tab === 'profile' && k === 'settings') ? 'active' : ''}>{label}</a>
         ))}
       </nav>
     </div>

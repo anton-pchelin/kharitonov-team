@@ -101,3 +101,25 @@ describe('без интернета', async () => {
     expect(fmtTime(3723)).toBe('1:02:03')
   })
 })
+
+describe('прогресс', async () => {
+  const { epley, records, weightSeries, isRecordSet, weeklyStats } = await import('./lib/progress')
+  const s = (date: string, weight: number, reps: number) => ({ item_id: date, set_no: 1, weight, reps, done: true, date, name: 'Присед', exercise_id: 'sq' })
+  const squats = [s('2026-11-02', 40, 10), s('2026-11-09', 45, 10), s('2026-11-16', 50, 10)]
+
+  it('три приседа 40/45/50 × 10: рост, рекорд 50×10, 1ПМ ≈ 66,7', () => {
+    expect(weightSeries(squats).best.map((p) => p.y)).toEqual([40, 45, 50])
+    const r = records(squats)
+    expect(r.byReps.find((b) => b.reps === 10)?.weight).toBe(50)
+    expect(r.e1rm).toBe(66.7)
+    expect(epley(50, 1)).toBe(50)
+  })
+  it('🏆 — только если 1ПМ выше всех прошлых', () => {
+    expect(isRecordSet(50, 10, squats.slice(0, 2))).toBe(true)
+    expect(isRecordSet(40, 10, squats.slice(0, 2))).toBe(false)
+    expect(isRecordSet(40, 10, [])).toBe(false)
+  })
+  it('тоннаж по неделям', () => {
+    expect(weeklyStats(squats).map((w) => w.tonnage)).toEqual([400, 450, 500])
+  })
+})

@@ -177,3 +177,31 @@ main:has(.week) { max-width: 1200px; }
 .switch { flex-direction: row; align-items: center; gap: 12px; min-height: 48px; color: var(--text); font-size: 1rem; }
 .switch input { width: 24px; min-height: 24px; height: 24px; accent-color: var(--primary); }
 .remind-now { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+
+/* Этап 5: прогресс */
+.chips { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 6px; margin-bottom: 8px; }
+.chip { flex: none; min-height: 40px; padding: 8px 14px; border-radius: 999px; border: 1px solid var(--line); background: var(--card); color: var(--text); font: inherit; font-size: 0.9rem; cursor: pointer; }
+.chip.on { background: var(--primary); border-color: var(--primary); color: var(--on-primary); font-weight: 700; }
+.chart { position: relative; margin: 8px 0 16px; padding: 8px; border-radius: var(--radius); background: var(--card); border: 1px solid var(--line); }
+.chart svg { width: 100%; height: auto; display: block; touch-action: pan-y; }
+.chart .grid { stroke: var(--line); stroke-width: 1; }
+.chart .tick { fill: var(--muted); font-size: 11px; }
+.chart { max-width: 720px; }
+.chart .crosshair { stroke: var(--muted); stroke-width: 1; stroke-dasharray: 3 3; }
+.chart .series polyline { fill: none; stroke: var(--text); stroke-width: 2; stroke-linejoin: round; }
+.chart .series circle { fill: var(--text); stroke: var(--card); stroke-width: 2; }
+.chart .muted-line polyline { stroke: var(--muted); stroke-dasharray: 6 4; }
+.chart .muted-line circle { fill: var(--muted); }
+.legend { display: flex; gap: 16px; font-size: 0.85rem; color: var(--muted); padding: 0 4px 6px; }
+.legend span { display: flex; align-items: center; gap: 6px; }
+.swatch-line { display: inline-block; width: 18px; border-top: 2px solid var(--text); }
+.swatch-line.muted-line { border-top: 2px dashed var(--muted); }
+.chart-tip { display: flex; gap: 12px; flex-wrap: wrap; font-size: 0.9rem; padding: 4px; }
+.history { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+.history th, .history td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--line); vertical-align: top; }
+.list-row { padding: 6px 0; border-bottom: 1px solid var(--line); }
+.compare { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 8px 0; }
+.compare figure { margin: 0; }
+.compare img, .compare .ex-noimg { width: 100%; aspect-ratio: 3 / 4; object-fit: cover; border-radius: 12px; }
+.compare figcaption { font-size: 0.85rem; color: var(--muted); text-align: center; }
+label.btn { display: flex; align-items: center; justify-content: center; color: var(--on-primary); font-size: 1rem; }
