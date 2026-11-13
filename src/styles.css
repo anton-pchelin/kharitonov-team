@@ -93,3 +93,53 @@ input:focus, textarea:focus, select:focus { outline: 2px solid var(--primary); o
 }
 .palette.active { border-color: var(--primary); }
 .swatch { width: 28px; height: 28px; flex: none; border-radius: 50%; border: 2px solid; }
+
+/* Этап 2: неделя и редактор тренировки */
+main:has(.week) { max-width: 1200px; }
+.plan-head { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+.plan-head select { width: auto; flex: 1; min-width: 180px; }
+.week-nav { display: flex; align-items: center; gap: 8px; }
+.week { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 8px; }
+@media (max-width: 860px) { .week { grid-template-columns: 1fr; } }
+.day { display: flex; flex-direction: column; gap: 6px; padding: 8px; border-radius: var(--radius); background: var(--card); border: 1px solid var(--line); min-height: 120px; }
+.day.is-today { border-color: var(--primary); }
+.day-head { font-weight: 700; }
+.rest { font-size: 0.9rem; }
+.add-day { margin-top: auto; min-height: 44px; border: 2px dashed var(--line); border-radius: 12px; background: none; color: var(--muted); font-size: 1.4rem; cursor: pointer; }
+.wcard { position: relative; border-radius: 12px; background: var(--bg); border: 1px solid var(--line); }
+.wcard.draft { opacity: 0.7; border-style: dashed; }
+.wcard-open { display: block; width: 100%; padding: 8px 32px 8px 10px; text-align: left; font: inherit; color: inherit; background: none; border: 0; cursor: pointer; }
+.wcard ul { margin: 4px 0 0; padding-left: 16px; font-size: 0.85rem; }
+.wcard .menu { position: absolute; top: 2px; right: 2px; }
+.tag { display: inline-block; margin-left: 6px; padding: 0 8px; border-radius: 999px; font-size: 0.75rem; background: var(--secondary); color: var(--on-secondary); }
+.inline-form { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px; }
+.inline-form > * { flex: 1 1 120px; }
+.menu { position: relative; }
+.menu summary { list-style: none; cursor: pointer; min-width: 36px; min-height: 36px; display: grid; place-items: center; border-radius: 10px; font-weight: 700; }
+.menu summary::-webkit-details-marker { display: none; }
+.menu-list { position: absolute; right: 0; z-index: 5; display: flex; flex-direction: column; min-width: 220px; padding: 6px; background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: 0 8px 24px rgba(0,0,0,0.15); }
+.menu-list button { padding: 12px; text-align: left; font: inherit; color: var(--text); background: none; border: 0; border-radius: 10px; cursor: pointer; }
+.menu-list button:hover { background: var(--secondary); }
+.editor { margin-top: 16px; display: flex; flex-direction: column; gap: 10px; }
+.item { display: flex; flex-direction: column; gap: 6px; padding: 10px; border-radius: var(--radius); background: var(--bg); border: 1px solid var(--line); touch-action: manipulation; }
+.item.superset { border-left: 6px solid var(--primary); }
+.item-head { display: flex; align-items: center; gap: 8px; }
+.item-label { min-width: 28px; }
+.item-name { flex: 1; font-weight: 700; }
+.handle { touch-action: none; cursor: grab; min-width: 36px; min-height: 44px; border: 0; background: none; color: var(--muted); font-size: 1.1rem; }
+.block-note { font-weight: 600; }
+.format-bar { display: flex; gap: 4px; }
+.format-bar button { min-width: 44px; min-height: 36px; border: 1px solid var(--line); border-radius: 10px; background: var(--card); color: var(--text); cursor: pointer; }
+.stepper { display: flex; align-items: center; gap: 8px; flex: 0 0 auto !important; }
+.stepper button { width: 44px; height: 44px; border-radius: 50%; border: 0; background: var(--secondary); color: var(--on-secondary); font-size: 1.3rem; cursor: pointer; }
+.stepper span { min-width: 24px; text-align: center; font-weight: 700; }
+.add-item { position: relative; }
+.suggest { display: flex; flex-direction: column; margin-top: 4px; padding: 6px; border-radius: var(--radius); background: var(--card); border: 1px solid var(--line); }
+.suggest small { padding: 6px 8px 2px; }
+.suggest button { padding: 10px 8px; text-align: left; font: inherit; color: var(--text); background: none; border: 0; border-radius: 10px; cursor: pointer; }
+.suggest button:hover { background: var(--secondary); }
+.markup p { margin: 0 0 4px; }
+.markup ul { margin: 0 0 4px; padding-left: 20px; }
+.video-link { padding: 6px 0; background: none; border: 0; font: inherit; color: var(--text); font-weight: 600; cursor: pointer; text-decoration: underline; }
+.video-frame { position: relative; padding-top: 56.25%; border-radius: 12px; overflow: hidden; background: #000; }
+.video-frame iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }

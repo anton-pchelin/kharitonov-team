@@ -8,6 +8,7 @@ import { AthleteCard } from './screens/AthleteCard'
 import { Exercises } from './screens/Exercises'
 import { MyProfile } from './screens/MyProfile'
 import { Settings } from './screens/Settings'
+import { Plan } from './screens/Plan'
 
 const INVITE_KEY = 'inviteToken'
 
@@ -114,7 +115,7 @@ export function App() {
   }
 
   const tabs = isCoach
-    ? [['athletes', 'Атлеты'], ['exercises', 'Упражнения'], ['settings', 'Настройки']]
+    ? [['athletes', 'Атлеты'], ['plan', 'План'], ['exercises', 'Упражнения'], ['settings', 'Настройки']]
     : [['profile', 'Профиль'], ['exercises', 'Упражнения'], ['settings', 'Настройки']]
   const tab = tabs.some(([k]) => k === route[0]) || route[0] === 'athlete' ? route[0] : tabs[0][0]
 
@@ -125,6 +126,7 @@ export function App() {
         {inviteError && <p className="error">{inviteError}</p>}
         {tab === 'athletes' && <Athletes />}
         {tab === 'athlete' && isCoach && <AthleteCard id={route[1]} />}
+        {tab === 'plan' && isCoach && <Plan athleteId={route[1]} week={route[2]} />}
         {tab === 'profile' && <MyProfile profile={profile} onSave={update} />}
         {tab === 'exercises' && <Exercises canEdit={isCoach} />}
         {tab === 'settings' && <Settings profile={profile} onChange={update} />}

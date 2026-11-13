@@ -14,6 +14,7 @@ declare
   mail2 text := 'rls-' || gen_random_uuid() || '@example.com';
   inv1 uuid; inv2 uuid; inv3 uuid; inv_old uuid;
   base_id uuid;
+  w_pub uuid; w_draft uuid; w_self uuid;
   n int;
   t text;
 begin
@@ -155,6 +156,60 @@ begin
     assert false, 'база приняла ссылку javascript:';
   exception when check_violation then null;
   end;
+
+  -- Тренировки (этап 2): черновик атлету не виден, чужим — ничего
+  perform set_config('request.jwt.claims', json_build_object('sub', coach1, 'role', 'authenticated')::text, true);
+  w_pub := public.save_workout(json_build_object('athlete_id', a1, 'date', current_date, 'title', 'Пн', 'published', true)::jsonb,
+    json_build_array(json_build_object('id', gen_random_uuid(), 'position', 0, 'name', 'Присед', 'result_type', 'weight_reps', 'planned_sets', 4))::jsonb);
+  w_draft := public.save_workout(json_build_object('athlete_id', a1, 'date', current_date + 1, 'title', 'Черновик', 'published', false)::jsonb,
+    json_build_array(json_build_object('id', gen_random_uuid(), 'position', 0, 'name', 'Тяга', 'result_type', 'weight_reps', 'planned_sets', 4))::jsonb);
+  begin
+    perform public.save_workout(json_build_object('athlete_id', a3, 'date', current_date, 'title', 'Чужому', 'published', true)::jsonb,
+      json_build_array(json_build_object('id', gen_random_uuid(), 'position', 0, 'name', 'X', 'result_type', 'check', 'planned_sets', 1))::jsonb);
+    assert false, 'тренер создал тренировку чужому атлету';
+  exception when insufficient_privilege then null;
+  end;
+  perform public.copy_workout(w_pub, a2, current_date + 7);
+  select count(*) into n from public.workouts where athlete_id = a2;
+  assert n = 1, 'копия тренировки атлету 2 не создалась';
+
+  perform set_config('request.jwt.claims', json_build_object('sub', a1, 'role', 'authenticated')::text, true);
+  select count(*) into n from public.workouts;
+  assert n = 1, 'атлет видит черновик или чужие тренировки: ' || n;
+  select count(*) into n from public.workout_items i join public.workouts w on w.id = i.workout_id where w.id = w_draft;
+  assert n = 0, 'атлет видит задания черновика';
+  begin
+    insert into public.workouts (athlete_id, date, title) values (a1, current_date, 'Сам себе план');
+    assert false, 'атлет создал тренерскую тренировку';
+  exception when insufficient_privilege then null;
+  end;
+  insert into public.workouts (athlete_id, date, title, self, published) values (a1, current_date + 5, 'Бег 5 км', true, true) returning id into w_self;
+  insert into public.workout_items (workout_id, name, self, result_type) values (w_pub, 'Бицепс со штангой', true, 'weight_reps');
+  begin
+    insert into public.workout_items (workout_id, name, self) values (w_draft, 'В черновик', true);
+    assert false, 'атлет добавил упражнение в черновик тренера';
+  exception when insufficient_privilege then null;
+  end;
+  update public.workout_items set name = 'взлом' where workout_id = w_pub and not self;
+  get diagnostics n = row_count;
+  assert n = 0, 'атлет изменил задание тренера';
+  update public.workouts set title = 'взлом' where id = w_pub;
+  get diagnostics n = row_count;
+  assert n = 0, 'атлет изменил тренировку тренера';
+
+  perform set_config('request.jwt.claims', json_build_object('sub', a3, 'role', 'authenticated')::text, true);
+  select count(*) into n from public.workouts where athlete_id in (a1, a2);
+  assert n = 0, 'атлет видит тренировки чужих атлетов';
+  perform set_config('request.jwt.claims', json_build_object('sub', coach2, 'role', 'authenticated')::text, true);
+  select count(*) into n from public.workouts where athlete_id in (a1, a2);
+  assert n = 0, 'чужой тренер видит тренировки';
+  perform set_config('request.jwt.claims', json_build_object('sub', coach1, 'role', 'authenticated')::text, true);
+  select count(*) into n from public.workouts where id = w_self;
+  assert n = 1, 'тренер не видит свою тренировку атлета («сам»)';
+  perform public.save_workout(json_build_object('id', w_pub, 'athlete_id', a1, 'date', current_date, 'title', 'Пн2', 'published', true)::jsonb,
+    json_build_array(json_build_object('id', gen_random_uuid(), 'position', 0, 'name', 'Присед', 'result_type', 'weight_reps', 'planned_sets', 4))::jsonb);
+  select count(*) into n from public.workout_items where workout_id = w_pub and self;
+  assert n = 1, 'сохранение тренера удалило упражнение атлета («сам»)';
 
   -- Без входа ничего не видно
   perform set_config('role', 'anon', true);

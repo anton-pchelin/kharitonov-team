@@ -5,7 +5,7 @@ import { isVideoUrl, searchExercises, type Exercise } from '../search'
 const PAGE = 1000  // столько строк Supabase отдаёт за один запрос
 const SHOW = 40
 
-async function loadAll(): Promise<Exercise[]> {
+export async function loadExercises(): Promise<Exercise[]> {
   const all: Exercise[] = []
   for (let from = 0; ; from += PAGE) {
     const { data, error } = await supabase
@@ -31,7 +31,7 @@ export function Exercises({ canEdit }: { canEdit: boolean }) {
   const [open, setOpen] = useState<Exercise | 'new' | null>(null)
 
   useEffect(() => {
-    loadAll().then(setList, (e) => { alert('Не загрузилось: ' + e.message); setList([]) })
+    loadExercises().then(setList, (e) => { alert('Не загрузилось: ' + e.message); setList([]) })
   }, [])
 
   const muscles = useMemo(() => uniq((list ?? []).flatMap((e) => e.muscles)), [list])

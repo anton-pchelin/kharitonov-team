@@ -42,3 +42,28 @@ describe('поиск упражнений', () => {
     expect(isVideoUrl('просто текст')).toBe(false)
   })
 })
+
+describe('конструктор тренировки', async () => {
+  const { itemLabels } = await import('./lib/workout')
+  const { embedUrl } = await import('./lib/video')
+  const { addDays, mondayOf } = await import('./lib/dates')
+
+  it('нумерует суперсет буквами: 1, 2А, 2Б, 3', () => {
+    expect(itemLabels([{ superset: null }, { superset: 1 }, { superset: 1 }, { superset: null }])).toEqual(['1', '2А', '2Б', '3'])
+    // одиночное задание с меткой суперсета — обычный номер
+    expect(itemLabels([{ superset: 1 }, { superset: null }, { superset: 2 }, { superset: 2 }, { superset: 2 }])).toEqual(['1', '2', '3А', '3Б', '3В'])
+  })
+  it('узнаёт ссылки на видео для плеера', () => {
+    expect(embedUrl('https://rutube.ru/video/abc123def/')).toBe('https://rutube.ru/play/embed/abc123def')
+    expect(embedUrl('https://vk.com/video-12345_678')).toBe('https://vk.com/video_ext.php?oid=-12345&id=678')
+    expect(embedUrl('https://vkvideo.ru/video-1_2')).toBe('https://vk.com/video_ext.php?oid=-1&id=2')
+    expect(embedUrl('https://youtu.be/xyz')).toBe('https://www.youtube.com/embed/xyz')
+    expect(embedUrl('https://www.youtube.com/watch?v=xyz&t=1')).toBe('https://www.youtube.com/embed/xyz')
+    expect(embedUrl('https://example.com/video.mp4')).toBeNull()
+  })
+  it('считает недели с понедельника', () => {
+    expect(mondayOf('2026-11-15')).toBe('2026-11-09')
+    expect(mondayOf('2026-11-09')).toBe('2026-11-09')
+    expect(addDays('2026-12-30', 3)).toBe('2027-01-02')
+  })
+})
