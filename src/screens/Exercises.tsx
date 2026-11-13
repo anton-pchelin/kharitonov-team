@@ -5,17 +5,28 @@ import { isVideoUrl, searchExercises, type Exercise } from '../search'
 const PAGE = 1000  // столько строк Supabase отдаёт за один запрос
 const SHOW = 40
 
+const CACHE_KEY = 'exercises:v1'
+
+/** Вся база упражнений; копия лежит в телефоне — без сети отдаём её. */
 export async function loadExercises(): Promise<Exercise[]> {
-  const all: Exercise[] = []
-  for (let from = 0; ; from += PAGE) {
-    const { data, error } = await supabase
-      .from('exercises')
-      .select('id, name, aliases, muscles, equipment, image_url, video_url, source')
-      .order('name')
-      .range(from, from + PAGE - 1)
-    if (error) throw error
-    all.push(...(data as Exercise[]))
-    if (data.length < PAGE) return all
+  try {
+    const all: Exercise[] = []
+    for (let from = 0; ; from += PAGE) {
+      const { data, error } = await supabase
+        .from('exercises')
+        .select('id, name, aliases, muscles, equipment, image_url, video_url, source')
+        .order('name')
+        .range(from, from + PAGE - 1)
+      if (error) throw error
+      all.push(...(data as Exercise[]))
+      if (data.length < PAGE) break
+    }
+    try { localStorage.setItem(CACHE_KEY, JSON.stringify(all)) } catch { /* места нет — обойдёмся без копии */ }
+    return all
+  } catch (e) {
+    const cached = localStorage.getItem(CACHE_KEY)
+    if (cached) return JSON.parse(cached) as Exercise[]
+    throw e
   }
 }
 

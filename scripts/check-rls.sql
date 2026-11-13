@@ -14,7 +14,7 @@ declare
   mail2 text := 'rls-' || gen_random_uuid() || '@example.com';
   inv1 uuid; inv2 uuid; inv3 uuid; inv_old uuid;
   base_id uuid;
-  w_pub uuid; w_draft uuid; w_self uuid;
+  w_pub uuid; w_draft uuid; w_self uuid; it uuid; it_draft uuid; w_old uuid;
   n int;
   t text;
 begin
@@ -210,6 +210,60 @@ begin
     json_build_array(json_build_object('id', gen_random_uuid(), 'position', 0, 'name', 'Присед', 'result_type', 'weight_reps', 'planned_sets', 4))::jsonb);
   select count(*) into n from public.workout_items where workout_id = w_pub and self;
   assert n = 1, 'сохранение тренера удалило упражнение атлета («сам»)';
+
+  -- Результаты и комментарии (этап 3)
+  select id into it from public.workout_items where workout_id = w_pub and not self limit 1;
+  select id into it_draft from public.workout_items where workout_id = w_draft limit 1;
+  w_old := public.save_workout(json_build_object('athlete_id', a1, 'date', current_date - 10, 'title', 'Старая', 'published', true)::jsonb,
+    json_build_array(json_build_object('id', gen_random_uuid(), 'position', 0, 'name', 'Присед', 'result_type', 'weight_reps', 'planned_sets', 1))::jsonb);
+  perform set_config('request.jwt.claims', json_build_object('sub', a1, 'role', 'authenticated')::text, true);
+  insert into public.set_results (item_id, set_no, weight, reps, done) values (it, 1, 40, 10, true);
+  insert into public.comments (workout_id, item_id, text) values (w_pub, it, 'резина синяя');
+  begin
+    insert into public.set_results (item_id, set_no, weight) values (it_draft, 1, 1);
+    assert false, 'атлет записал результат в черновик';
+  exception when insufficient_privilege then null;
+  end;
+  begin
+    insert into public.set_results (item_id, set_no, weight)
+      select id, 1, 1 from public.workout_items where workout_id = w_old;
+    assert false, 'атлет записал результат в тренировку старше 7 дней';
+  exception when insufficient_privilege then null;
+  end;
+  perform public.complete_workout(w_pub);
+  perform set_config('request.jwt.claims', json_build_object('sub', a2, 'role', 'authenticated')::text, true);
+  begin
+    insert into public.set_results (item_id, set_no, weight) values (it, 2, 1);
+    assert false, 'чужой атлет записал результат';
+  exception when insufficient_privilege then null;
+  end;
+  select count(*) into n from public.set_results where item_id = it;
+  assert n = 0, 'атлет видит чужие результаты';
+  select count(*) into n from public.comments where workout_id = w_pub;
+  assert n = 0, 'атлет видит чужие комментарии';
+  perform public.complete_workout(w_pub);
+  perform set_config('request.jwt.claims', json_build_object('sub', coach1, 'role', 'authenticated')::text, true);
+  select count(*) into n from public.set_results where item_id = it;
+  assert n = 1, 'тренер не видит результаты атлета';
+  update public.set_results set weight = 999 where item_id = it;
+  get diagnostics n = row_count;
+  assert n = 0, 'тренер изменил результат атлета';
+  select count(*) into n from public.workouts where id = w_pub and completed_at is not null;
+  assert n = 1, 'атлет не смог завершить тренировку';
+  insert into public.comments (workout_id, item_id, text) values (w_pub, it, 'спину ровнее');
+  -- тренер убрал задание с результатами — оно остаётся как «сам», результаты целы
+  perform public.save_workout(json_build_object('id', w_pub, 'athlete_id', a1, 'date', current_date, 'title', 'Пн3', 'published', true)::jsonb,
+    json_build_array(json_build_object('id', gen_random_uuid(), 'position', 0, 'name', 'Новое', 'result_type', 'check', 'planned_sets', 1))::jsonb);
+  select count(*) into n from public.set_results where item_id = it;
+  assert n = 1, 'результаты пропали, когда тренер убрал задание';
+  select count(*) into n from public.workout_items where id = it and self;
+  assert n = 1, 'убранное задание с результатами не стало «сам»';
+  perform set_config('request.jwt.claims', json_build_object('sub', coach2, 'role', 'authenticated')::text, true);
+  begin
+    insert into public.comments (workout_id, text) values (w_pub, 'чужой');
+    assert false, 'чужой тренер написал комментарий';
+  exception when insufficient_privilege then null;
+  end;
 
   -- Без входа ничего не видно
   perform set_config('role', 'anon', true);

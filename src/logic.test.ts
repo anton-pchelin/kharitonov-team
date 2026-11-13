@@ -67,3 +67,37 @@ describe('конструктор тренировки', async () => {
     expect(addDays('2026-12-30', 3)).toBe('2027-01-02')
   })
 })
+
+describe('без интернета', async () => {
+  const { applyLocal, previousSets } = await import('./lib/offline')
+  const { parseNum, parseTime, fmtTime } = await import('./lib/format')
+  const base = { workouts: [{ id: 'w', athlete_id: 'a', date: '2026-11-09', title: '', prescription: '', published: true, self: false, completed_at: null, workout_items: [] }], results: [], comments: [], history: [], syncedAt: null }
+
+  it('повторный ввод подхода заменяет, а не дублирует', () => {
+    let c = applyLocal(base, { t: 'set', row: { item_id: 'i', set_no: 1, weight: 40, done: false } })
+    c = applyLocal(c, { t: 'set', row: { item_id: 'i', set_no: 1, weight: 45, done: true } })
+    expect(c.results).toEqual([{ item_id: 'i', set_no: 1, weight: 45, done: true }])
+    expect(applyLocal(c, { t: 'unset', item_id: 'i', set_no: 1 }).results).toEqual([])
+  })
+  it('своё упражнение и завершение видны сразу', () => {
+    const item = { id: 'x', workout_id: 'w', position: 1000, exercise_id: null, name: 'Бицепс', plan_text: '', video_url: null, result_type: 'weight_reps' as const, planned_sets: 3, superset: null, block_note: '', self: true }
+    let c = applyLocal(base, { t: 'item', row: item })
+    c = applyLocal(c, { t: 'item', row: item })  // повтор из очереди не дублирует
+    c = applyLocal(c, { t: 'complete', id: 'w', at: '2026-11-09T10:00:00Z' })
+    expect(c.workouts[0].workout_items).toHaveLength(1)
+    expect(c.workouts[0].completed_at).toBe('2026-11-09T10:00:00Z')
+  })
+  it('«прошлый раз» — последняя более ранняя тренировка с тем же упражнением', () => {
+    const h = (date: string, set_no: number, weight: number) => ({ item_id: date, set_no, weight, reps: 10, done: true, date, name: 'Присед', exercise_id: 'sq' })
+    const hist = [h('2026-11-02', 1, 35), h('2026-11-09', 1, 40), h('2026-11-09', 2, 45), h('2026-11-16', 1, 50)]
+    expect(previousSets(hist, { name: 'Присед', exercise_id: 'sq' }, '2026-11-16').map((s) => s.weight)).toEqual([40, 45])
+    expect(previousSets(hist, { name: 'присед', exercise_id: null }, '2026-11-03').map((s) => s.weight)).toEqual([35])
+  })
+  it('понимает запятую и время', () => {
+    expect(parseNum('72,5')).toBe(72.5)
+    expect(parseNum('abc')).toBeNull()
+    expect(parseTime('28:30')).toBe(1710)
+    expect(fmtTime(1710)).toBe('28:30')
+    expect(fmtTime(3723)).toBe('1:02:03')
+  })
+})
