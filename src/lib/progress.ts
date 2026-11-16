@@ -96,3 +96,15 @@ export function maxFor(item: { exercise_id: string | null; name: string }, histo
 
 /** Вес от % максимума, округление до 2,5 кг. */
 export const pctWeight = (pct: number, max: number) => Math.round((max * pct) / 100 / 2.5) * 2.5
+
+/**
+ * Подбор под прошлый подход: введены повторы — вес той же трудности (и наоборот), по Эпли.
+ * Вес округляется до 2,5 кг. Это «удержать форму»; чтобы расти — брать чуть больше.
+ */
+export function matchSet(prev: { weight?: number | null; reps?: number | null }, typed: { weight?: number | null; reps?: number | null }): { weight?: number; reps?: number } {
+  if (!prev.weight || !prev.reps) return {}
+  const max = epley(prev.weight, prev.reps)
+  if (typed.reps && !typed.weight) return { weight: Math.round((typed.reps > 1 ? max / (1 + typed.reps / 30) : max) / 2.5) * 2.5 }
+  if (typed.weight && !typed.reps) return { reps: Math.max(1, Math.round(30 * (max / typed.weight - 1))) }
+  return {}
+}

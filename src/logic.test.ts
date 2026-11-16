@@ -166,3 +166,14 @@ describe('в зале', async () => {
     expect(timerState({ kind: 'emom', minutes: 10 }, 3000 + 125000)).toMatchObject({ round: 3, left: 55 })
   })
 })
+
+it('подбор веса и повторов под прошлый подход', async () => {
+  const { matchSet } = await import('./lib/progress')
+  const prev = { weight: 100, reps: 5 }  // 1ПМ ≈ 116,7
+  expect(matchSet(prev, { reps: 5 })).toEqual({ weight: 100 })
+  expect(matchSet(prev, { reps: 8 })).toEqual({ weight: 92.5 })
+  expect(matchSet(prev, { reps: 1 })).toEqual({ weight: 117.5 })
+  expect(matchSet(prev, { weight: 90 })).toEqual({ reps: 9 })
+  expect(matchSet(prev, { weight: 90, reps: 3 })).toEqual({})
+  expect(matchSet({ weight: null, reps: 10 }, { reps: 5 })).toEqual({})
+})

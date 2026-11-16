@@ -5,7 +5,7 @@ import { Video } from '../lib/video'
 import { fmtNum, fmtTime, parseNum, parseTime } from '../lib/format'
 import { itemLabels, resultLabel, type ResultType, type Workout, type WorkoutItem } from '../lib/workout'
 import { previousSets, type Comment, type PastSet, type SetResult } from '../lib/offline'
-import { exerciseKey, isRecordSet, maxFor, pctWeight, type MaxRecord } from '../lib/progress'
+import { exerciseKey, isRecordSet, matchSet, maxFor, pctWeight, type MaxRecord } from '../lib/progress'
 import { platesFor } from '../lib/plates'
 
 export type ViewProps = {
@@ -135,6 +135,9 @@ function SetRow({ n, type, value, hint, record, editable, onPut, gym, pctKg }: {
   const [draft, setDraft] = useState<Partial<Record<Field, string>>>({})
   const [calc, setCalc] = useState(false)
   const text = (f: Field) => draft[f] ?? show(f, value?.[f])
+  // ввёл повторы — в поле веса серым вес той же трудности, что в прошлый раз (и наоборот)
+  const typed = (f: 'weight' | 'reps') => (draft[f] !== undefined ? parseNum(draft[f]!) : value?.[f]) ?? null
+  const match: Partial<Record<Field, number>> = type === 'weight_reps' && hint ? matchSet(hint, { weight: typed('weight'), reps: typed('reps') }) : {}
   const commit = (f: Field) => {
     if (draft[f] === undefined) return
     const v = parse(f, draft[f]!)
@@ -148,18 +151,18 @@ function SetRow({ n, type, value, hint, record, editable, onPut, gym, pctKg }: {
         <span key={f} className="set-field">
           {i > 0 && <span className="muted">×</span>}
           <input inputMode={f === 'time_sec' ? 'numeric' : 'decimal'} disabled={!editable} aria-label={`${UNIT[f]}, подход ${n}`}
-            placeholder={show(f, hint?.[f]) || (f === 'weight' ? '' : UNIT[f])} value={text(f)}
+            placeholder={(match[f] != null ? '≈ ' + show(f, match[f]) : show(f, hint?.[f])) || (f === 'weight' ? '' : UNIT[f])} value={text(f)}
             onChange={(e) => setDraft((d) => ({ ...d, [f]: e.target.value }))}
             onBlur={() => commit(f)} onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()} />
           {f === 'weight' && <span className="muted">кг</span>}
           {f === 'weight' && gym && <button type="button" className="plate-btn" aria-label="Какие блины повесить" onClick={() => setCalc(!calc)}>🏋</button>}
         </span>
       ))}
-      {calc && gym && <Plates weight={parseNum(draft.weight ?? '') ?? value?.weight ?? hint?.weight ?? pctKg ?? null} gym={gym} />}
+      {calc && gym && <Plates weight={parseNum(draft.weight ?? '') ?? value?.weight ?? match.weight ?? hint?.weight ?? pctKg ?? null} gym={gym} />}
       <button className={'round-check' + (value?.done ? ' on' : '')} disabled={!editable} aria-label={`Подход ${n} выполнен`}
         onClick={() => {
           // ✓ на пустом подходе берёт подсказку «прошлый раз»
-          const filled = Object.fromEntries(fields.map((f) => [f, value?.[f] ?? (draft[f] ? parse(f, draft[f]!) : hint?.[f] ?? null)]))
+          const filled = Object.fromEntries(fields.map((f) => [f, value?.[f] ?? (draft[f] ? parse(f, draft[f]!) : match[f] ?? hint?.[f] ?? null)]))
           onPut({ ...filled, done: !value?.done })
           setDraft({})
         }}>✓</button>
