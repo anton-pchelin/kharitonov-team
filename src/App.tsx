@@ -16,6 +16,7 @@ import { Feed } from './screens/Feed'
 import { Icon, type IconName } from './lib/icons'
 
 const INVITE_KEY = 'inviteToken'
+const VIEW_KEY = 'viewAs'  // тренер смотрит приложение как атлет
 
 const INVITE_ERRORS: Record<string, string> = {
   invalid: 'Ссылка-приглашение не найдена. Попросите тренера новую ссылку.',
@@ -51,6 +52,7 @@ export function App() {
   const [hasCoach, setHasCoach] = useState(false)
   const [inviteError, setInviteError] = useState('')
   const [invite, setInvite] = useState(() => localStorage.getItem(INVITE_KEY))
+  const [asAthlete, setAsAthlete] = useState(() => localStorage.getItem(VIEW_KEY) === 'athlete')
 
   // Ссылка-приглашение: запоминаем и принимаем после входа (или сразу, если уже вошли).
   if (route[0] === 'invite' && route[1]) {
@@ -104,8 +106,16 @@ export function App() {
 
   if (!profile.name) return <MyProfile profile={profile} onSave={update} first />
 
-  const isCoach = profile.role === 'coach'
-  if (!isCoach && !hasCoach) {
+  const realCoach = profile.role === 'coach'
+  const isCoach = realCoach && !asAthlete
+  // экраны видят роль, в которой тренер сейчас смотрит приложение
+  const shown: Profile = { ...profile, role: isCoach ? 'coach' : 'athlete' }
+  const switchView = async (athlete: boolean) => {
+    if (athlete) await supabase.rpc('coach_self_link')  // тренер — атлет у самого себя
+    localStorage.setItem(VIEW_KEY, athlete ? 'athlete' : 'coach')
+    setAsAthlete(athlete)
+  }
+  if (!realCoach && !hasCoach) {
     return (
       <div className="page">
         <header className="top"><Logo /></header>
@@ -146,16 +156,16 @@ export function App() {
       </aside>
       <main>
         {inviteError && <p className="error">{inviteError}</p>}
-        {tab === 'feed' && isCoach && <Feed me={profile} />}
+        {tab === 'feed' && isCoach && <Feed me={shown} />}
         {tab === 'athletes' && <Athletes />}
         {tab === 'athlete' && isCoach && <AthleteCard id={route[1]} />}
-        {tab === 'plan' && isCoach && <Plan athleteId={route[1]} week={route[2]} open={route[3]} me={profile} />}
-        {tab === 'today' && !isCoach && <Today profile={profile} date={route[1]} />}
+        {tab === 'plan' && isCoach && <Plan athleteId={route[1]} week={route[2]} open={route[3]} me={shown} />}
+        {tab === 'today' && !isCoach && <Today profile={shown} date={route[1]} />}
         {tab === 'progress' && (isCoach ? route[1] && <Progress athleteId={route[1]} title="Прогресс атлета" /> : <Progress athleteId={profile.id} />)}
         {tab === 'programs' && isCoach && <Programs id={route[1]} />}
-        {tab === 'profile' && <MyProfile profile={profile} onSave={update} />}
+        {tab === 'profile' && <MyProfile profile={shown} onSave={update} />}
         {tab === 'exercises' && <Exercises canEdit={isCoach} />}
-        {tab === 'settings' && <Settings profile={profile} onChange={update} />}
+        {tab === 'settings' && <Settings profile={shown} onChange={update} onSwitchView={realCoach ? switchView : undefined} />}
       </main>
       <nav className="tabs" aria-label="Разделы">{links}</nav>
     </div>

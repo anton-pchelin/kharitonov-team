@@ -378,6 +378,17 @@ begin
   select count(*) into n from storage.objects where bucket_id = 'videos' and name like a1 || '/%';
   assert n = 0, 'чужой тренер видит видео';
 
+  -- Атлет не может стать «тренером самому себе»; тренер — может (режим «смотреть как атлет»)
+  perform set_config('request.jwt.claims', json_build_object('sub', a1, 'role', 'authenticated')::text, true);
+  perform public.coach_self_link();
+  perform set_config('request.jwt.claims', json_build_object('sub', coach1, 'role', 'authenticated')::text, true);
+  perform public.coach_self_link();
+  perform set_config('role', 'none', true);
+  select count(*) into n from public.coach_athletes where coach_id = a1;
+  assert n = 0, 'атлет привязал себя как тренер';
+  select count(*) into n from public.coach_athletes where coach_id = coach1 and athlete_id = coach1;
+  assert n = 1, 'тренер не стал атлетом у себя';
+
   -- Без входа ничего не видно
   perform set_config('role', 'anon', true);
   perform set_config('request.jwt.claims', '{"role":"anon"}', true);

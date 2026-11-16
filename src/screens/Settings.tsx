@@ -33,7 +33,11 @@ function Row({ label, hint, children }: { label: ReactNode; hint?: ReactNode; ch
  * Настройки: на ПК — список разделов слева и выбранный раздел справа (как «Системные настройки» macOS),
  * на телефоне — все разделы друг под другом.
  */
-export function Settings({ profile, onChange }: { profile: Profile; onChange: (p: Partial<Profile>) => Promise<void> }) {
+export function Settings({ profile, onChange, onSwitchView }: {
+  profile: Profile; onChange: (p: Partial<Profile>) => Promise<void>
+  /** есть только у тренера: смотреть приложение как атлет */
+  onSwitchView?: (athlete: boolean) => void
+}) {
   const isCoach = profile.role === 'coach'
   const set = (patch: { palette?: string; theme?: ThemeMode }) => {
     saveLocalTheme(patch.palette ?? profile.palette, patch.theme ?? profile.theme)
@@ -43,7 +47,15 @@ export function Settings({ profile, onChange }: { profile: Profile; onChange: (p
   const sections: Section[] = [
     ['account', 'Учётная запись', 'user', (
       <div className="group">
-        <Row label={profile.name || 'Без имени'} hint={isCoach ? 'тренер' : 'атлет'} />
+        <Row label={profile.name || 'Без имени'} hint={onSwitchView ? 'тренер' : 'атлет'} />
+        {onSwitchView && (
+          <Row label="Смотреть как" hint="как атлет вы видите тренировки, которые назначили себе">
+            <div className="segmented">
+              <button className={isCoach ? 'active' : ''} onClick={() => onSwitchView(false)}>Тренер</button>
+              <button className={isCoach ? '' : 'active'} onClick={() => onSwitchView(true)}>Атлет</button>
+            </div>
+          </Row>
+        )}
         {!isCoach && <Row label="Анкета" hint="цели, оборудование, здоровье"><a className="btn small secondary" href="#/profile">Открыть</a></Row>}
         <Row label="Выйти из приложения"><button className="btn small secondary" onClick={() => supabase.auth.signOut()}>Выйти</button></Row>
       </div>
