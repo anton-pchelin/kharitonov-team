@@ -336,3 +336,16 @@ label.btn { display: flex; align-items: center; justify-content: center; color: 
   .plan-tools > * { flex: none; white-space: nowrap; }
   .plan-tools .remind-now { flex-wrap: nowrap; }
 }
+
+/* Полоса недели у атлета: число, день, точка-отметка тренировки */
+.week-strip { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; margin: 8px 0; }
+.week-strip button {
+  display: flex; flex-direction: column; align-items: center; gap: 2px; min-height: 56px; padding: 6px 0;
+  border: 0; border-radius: 12px; background: none; color: var(--text); font: inherit; cursor: pointer;
+}
+.week-strip button.active { background: var(--secondary); color: var(--on-secondary); }
+.week-strip button.now b { text-decoration: underline; text-decoration-color: var(--primary); text-decoration-thickness: 3px; text-underline-offset: 4px; }
+.week-strip small { color: var(--muted); }
+.week-strip .dot { width: 8px; height: 8px; border-radius: 50%; border: 2px solid transparent; box-sizing: border-box; }
+.week-strip .dot.planned { border-color: var(--text); }
+.week-strip .dot.done { background: #2E9E4F; border-color: #2E9E4F; }

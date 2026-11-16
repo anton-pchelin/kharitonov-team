@@ -7,7 +7,7 @@ import { OfflineStore } from '../lib/offline'
 import { prepareVideo, putBlob } from '../lib/videoUpload'
 import { Timer } from './Timer'
 import type { WorkoutItem } from '../lib/workout'
-import { addDays, fmtDay, today } from '../lib/dates'
+import { addDays, dayShort, fmtDay, mondayOf, parseIso, today, weekDays } from '../lib/dates'
 import { fmtNum } from '../lib/format'
 import { RESULT_TYPES, type ResultType, type Workout } from '../lib/workout'
 
@@ -50,10 +50,24 @@ export function Today({ profile, date: routeDate }: { profile: Profile; date?: s
   return (
     <>
       <div className="row-between">
-        <button className="btn small secondary" onClick={() => go(addDays(date, -1))} aria-label="Предыдущий день">←</button>
+        <button className="btn small secondary" onClick={() => go(addDays(date, -7))} aria-label="Предыдущая неделя">←</button>
         <b>{fmtDay(date)}</b>
-        <button className="btn small secondary" onClick={() => go(addDays(date, 1))} aria-label="Следующий день">→</button>
+        <button className="btn small secondary" onClick={() => go(addDays(date, 7))} aria-label="Следующая неделя">→</button>
       </div>
+      {/* неделя: точка — тренировка запланирована, закрашенная — выполнена */}
+      <nav className="week-strip" aria-label="Дни недели">
+        {weekDays(mondayOf(date)).map((d) => {
+          const ws = data.workouts.filter((w) => w.date === d)
+          const mark = !ws.length ? '' : ws.every((w) => w.completed_at) ? ' done' : ' planned'
+          return (
+            <button key={d} className={(d === date ? 'active' : '') + (d === today() ? ' now' : '')} onClick={() => go(d)}
+              aria-current={d === date ? 'date' : undefined}
+              aria-label={fmtDay(d) + (mark === ' done' ? ', тренировка выполнена' : mark ? ', есть тренировка' : '')}>
+              <b>{parseIso(d).getDate()}</b><small>{dayShort(d)}</small><i className={'dot' + mark} />
+            </button>
+          )
+        })}
+      </nav>
       <p className={'sync ' + store.status}>{STATUS[store.status]}{store.lastError && ` · ошибка: ${store.lastError}`}</p>
       {date !== today() && <button className="link-btn" onClick={() => go(today())}>← к сегодняшнему дню</button>}
 
