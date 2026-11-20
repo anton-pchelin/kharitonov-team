@@ -82,6 +82,11 @@ export function Today({ profile, date: routeDate }: { profile: Profile; date?: s
             extra={(item) => item.timer?.kind && editable && <button className="btn small" onClick={() => setTimer(item)}>▶ Таймер</button>}
             onMax={(item, weight) => store.do({ t: 'record', row: { id: crypto.randomUUID(), athlete_id: profile.id, exercise_id: item.exercise_id, name: item.name, weight, reps: 1 } })}
             onSet={(row) => store.do({ t: 'set', row })}
+            onDelete={(item) => {
+              if (!item) {
+                if (confirm(`Удалить тренировку «${w.title || 'Тренировка'}» и все её подходы?`)) store.do({ t: 'delete_workout', id: w.id })
+              } else if (confirm(`Удалить «${item.name}» и все его подходы?`)) store.do({ t: 'delete_item', id: item.id, workout_id: w.id })
+            }}
             onUnset={(item_id, set_no) => store.do({ t: 'unset', item_id, set_no })}
             onVideo={async (item_id, text, file) => {
               const blob = await prepareVideo(file)

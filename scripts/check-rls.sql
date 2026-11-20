@@ -439,6 +439,31 @@ begin
   assert n = 2, 'напоминаний об оплате должно быть 2 (за 7 дней и в последний), есть: ' || n;
   update public.coach_athletes set access_until = null where athlete_id = a1;
 
+  -- Удаление: атлет — только свои тренировки и задания «сам», тренер — только свои тренировки
+  perform set_config('role', 'authenticated', true);
+  perform set_config('request.jwt.claims', json_build_object('sub', a1, 'role', 'authenticated')::text, true);
+  delete from public.workouts where id = w_pub;
+  get diagnostics n = row_count;
+  assert n = 0, 'атлет удалил тренировку тренера';
+  delete from public.workout_items where workout_id = w_pub and not self;
+  get diagnostics n = row_count;
+  assert n = 0, 'атлет удалил задание тренера';
+  perform set_config('request.jwt.claims', json_build_object('sub', coach1, 'role', 'authenticated')::text, true);
+  delete from public.workouts where id = w_self;
+  get diagnostics n = row_count;
+  assert n = 0, 'тренер удалил свою тренировку атлета';
+  perform set_config('request.jwt.claims', json_build_object('sub', a1, 'role', 'authenticated')::text, true);
+  delete from public.workouts where id = w_self;
+  get diagnostics n = row_count;
+  assert n = 1, 'атлет не смог удалить свою тренировку';
+  perform set_config('request.jwt.claims', json_build_object('sub', coach1, 'role', 'authenticated')::text, true);
+  delete from public.workouts where id = w_pub;
+  get diagnostics n = row_count;
+  assert n = 1, 'тренер не смог удалить свою тренировку';
+  perform set_config('role', 'none', true);
+  select count(*) into n from public.set_results where item_id = it;
+  assert n = 0, 'подходы удалённой тренировки остались';
+
   -- Связь «сам себе атлет» запрещена
   perform set_config('role', 'none', true);
   begin

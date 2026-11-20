@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../supabase'
-import { addDays, fmtShort, mondayOf } from '../lib/dates'
+import { addDays, dayShort, fmtShort, mondayOf } from '../lib/dates'
+import type { Workout } from '../lib/workout'
+import { loadMyAthletes } from './Plan'
 
 type Athlete = { id: string; name: string }
 type Group = { id: string; name: string; members: string[] }
@@ -109,6 +111,54 @@ export function AssignProgram({ athlete, monday, athletes, onDone }: { athlete: 
         </>
       )}
       <button className="btn secondary" onClick={onDone}>Отмена</button>
+    </div>
+  )
+}
+
+/** Готовая тренировка из другого дня: атлет (из своих), неделя ‹ ›, тренировка → «Взять». Свои тренировки атлета не предлагаются. */
+export function PickWorkout({ athleteId, monday, onPick, onCancel }: {
+  athleteId: string; monday: string; onPick: (w: Workout) => void; onCancel: () => void
+}) {
+  const [athletes, setAthletes] = useState<Athlete[]>([])
+  const [who, setWho] = useState(athleteId)
+  const [mon, setMon] = useState(addDays(monday, -7))
+  const [list, setList] = useState<Workout[] | null>(null)
+  const [sel, setSel] = useState<Workout | null>(null)
+  useEffect(() => { loadMyAthletes().then(setAthletes) }, [])
+  useEffect(() => {
+    setList(null)
+    setSel(null)
+    supabase.from('workouts').select('*, workout_items(*)').eq('athlete_id', who).eq('self', false)
+      .gte('date', mon).lte('date', addDays(mon, 6)).order('date')
+      .then(({ data, error }) => { if (error) alert('Не загрузилось: ' + error.message); setList((data ?? []) as Workout[]) })
+  }, [who, mon])
+
+  return (
+    <div className="card pick-workout">
+      <select value={who} onChange={(e) => setWho(e.target.value)} aria-label="Атлет">
+        {athletes.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+      </select>
+      <div className="week-nav">
+        <button className="btn small secondary" onClick={() => setMon(addDays(mon, -7))} aria-label="Неделя раньше">‹</button>
+        <span>{fmtShort(mon)} — {fmtShort(addDays(mon, 6))}</span>
+        <button className="btn small secondary" onClick={() => setMon(addDays(mon, 7))} aria-label="Неделя позже">›</button>
+      </div>
+      {list === null && <p className="muted">Загрузка…</p>}
+      {list?.length === 0 && <p className="muted">На этой неделе тренировок нет</p>}
+      {list && list.length > 0 && (
+        <div className="suggest">
+          {list.map((w) => (
+            <button key={w.id} className={sel?.id === w.id ? 'active' : ''} aria-pressed={sel?.id === w.id} onClick={() => setSel(w)}>
+              <b>{dayShort(w.date)} {fmtShort(w.date)} · {w.title || 'Тренировка'}</b>
+              <br /><span className="muted">{(w.workout_items ?? []).filter((i) => !i.self).sort((a, b) => a.position - b.position).map((i) => i.name).join(', ')}</span>
+            </button>
+          ))}
+        </div>
+      )}
+      <div className="row">
+        <button className="btn" disabled={!sel} onClick={() => sel && onPick(sel)}>Взять</button>
+        <button className="btn secondary" onClick={onCancel}>Отмена</button>
+      </div>
     </div>
   )
 }

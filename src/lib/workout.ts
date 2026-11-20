@@ -64,3 +64,13 @@ export function itemLabels(items: Pick<WorkoutItem, 'superset'>[]): string[] {
 /** Первое задание суперсета — на нём хранится подпись блока. */
 export const isGroupStart = (items: Pick<WorkoutItem, 'superset'>[], i: number) =>
   items[i].superset != null && items[i - 1]?.superset !== items[i].superset && items[i + 1]?.superset === items[i].superset
+
+/** Задания другой тренировки — в конец: новые id, номера суперсетов после уже занятых, чтобы 3А/3Б не слились. */
+export function appendItems(items: WorkoutItem[], added: WorkoutItem[]): WorkoutItem[] {
+  const shift = Math.max(0, ...items.map((i) => i.superset ?? 0))
+  const extra = added.filter((i) => !i.self).sort((a, b) => a.position - b.position)
+    .map(({ workout_id: _w, self: _s, ...i }, k) => ({
+      ...i, id: crypto.randomUUID(), position: items.length + k, superset: i.superset == null ? null : i.superset + shift,
+    }))
+  return [...items, ...extra]
+}

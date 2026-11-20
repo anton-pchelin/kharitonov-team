@@ -4,9 +4,10 @@ import { SortableContext, arrayMove, sortableKeyboardCoordinates, useSortable, v
 import { CSS } from '@dnd-kit/utilities'
 import { supabase } from '../supabase'
 import { searchExercises, type Exercise } from '../search'
-import { fmtDay } from '../lib/dates'
-import { RESULT_TYPES, isGroupStart, itemLabels, type ResultType, type Workout, type WorkoutItem } from '../lib/workout'
+import { fmtDay, mondayOf } from '../lib/dates'
+import { RESULT_TYPES, appendItems, isGroupStart, itemLabels, type ResultType, type Workout, type WorkoutItem } from '../lib/workout'
 import { TIMER_KINDS, type TimerCfg } from '../lib/timer'
+import { PickWorkout } from './WeekTools'
 
 type Suggestion = {
   name: string
@@ -66,6 +67,7 @@ export function WorkoutEditor({ athleteId, athleteName = '', date = '', workout,
   const [items, setItems] = useState<WorkoutItem[]>(initial.items)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
+  const [picking, setPicking] = useState(false)
   const box = useRef<HTMLElement>(null)
   useEffect(() => { box.current?.scrollIntoView({ block: 'start' }) }, [])  // на телефоне редактор ниже всей недели
   const dirty = JSON.stringify({ title, prescription, published, items }) !== JSON.stringify(initial)
@@ -157,6 +159,10 @@ export function WorkoutEditor({ athleteId, athleteName = '', date = '', workout,
       </DndContext>
 
       <AddItem athleteId={athleteId} exercises={exercises} onAdd={(s) => setItems((l) => [...l, blank(s, l.length)])} />
+      {athleteId && (picking
+        ? <PickWorkout athleteId={athleteId} monday={mondayOf(workout?.date ?? date)}
+            onPick={(w) => { setItems((l) => appendItems(l, w.workout_items ?? [])); setPicking(false) }} onCancel={() => setPicking(false)} />
+        : <button className="btn secondary" onClick={() => setPicking(true)}>Вставить из другой тренировки</button>)}
 
       {error && <p className="error">{error}</p>}
       <button className="btn" onClick={save} disabled={busy}>{busy ? 'Сохраняю…' : 'Сохранить'}</button>

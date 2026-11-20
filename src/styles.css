@@ -139,6 +139,7 @@ main:has(.week) { max-width: 1200px; }
 .suggest small { padding: 6px 8px 2px; }
 .suggest button { padding: 10px 8px; text-align: left; font: inherit; color: var(--text); background: none; border: 0; border-radius: 10px; cursor: pointer; }
 .suggest button:hover { background: var(--secondary); }
+.suggest button.active { background: var(--secondary); color: var(--on-secondary); }
 .markup p { margin: 0 0 4px; }
 .markup ul { margin: 0 0 4px; padding-left: 20px; }
 .video-link { padding: 6px 0; background: none; border: 0; font: inherit; color: var(--text); font-weight: 600; cursor: pointer; text-decoration: underline; }

@@ -3,7 +3,7 @@ import { supabase } from '../supabase'
 import type { Exercise } from '../search'
 import { loadExercises } from './Exercises'
 import { WorkoutEditor, snapshot } from './WorkoutEditor'
-import { AssignProgram, CopyWeek } from './WeekTools'
+import { AssignProgram, CopyWeek, PickWorkout } from './WeekTools'
 import { DndContext, PointerSensor, useDraggable, useDroppable, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core'
 import type { WorkoutItem } from '../lib/workout'
 import { addDays, dayShort, fmtShort, mondayOf, today, weekDays } from '../lib/dates'
@@ -26,7 +26,8 @@ export function Plan({ athleteId, week, open, me }: { athleteId?: string; week?:
   const [exercises, setExercises] = useState<Exercise[]>([])
   const [workouts, setWorkouts] = useState<Workout[]>([])
   const [editing, setEditing] = useState<{ date: string; workout: Workout | null; template?: Template } | null>(null)
-  const [adding, setAdding] = useState<string | null>(null)  // день, где открыт выбор «пустая / из шаблона»
+  const [adding, setAdding] = useState<string | null>(null)  // день, где открыт выбор «пустая / из шаблона / из другого дня»
+  const [picking, setPicking] = useState<string | null>(null)  // день, куда берём тренировку из другого дня
   const [tool, setTool] = useState<'copy' | 'assign' | null>(null)
   const [templates, setTemplates] = useState<Template[]>([])
   const [viewing, setViewing] = useState<string | null>(open ?? null)
@@ -72,7 +73,17 @@ export function Plan({ athleteId, week, open, me }: { athleteId?: string; week?:
   }, [athlete?.id, monday])
 
   useEffect(() => { reload() }, [reload])
-  useEffect(() => { setEditing(null); setViewing(open ?? null); setTool(null) }, [athlete?.id, monday, open])
+  useEffect(() => { setEditing(null); setViewing(open ?? null); setTool(null); setPicking(null) }, [athlete?.id, monday, open])
+
+  // «Из другого дня»: копия черновиком в выбранный день, сразу в редактор
+  const take = async (src: Workout, date: string) => {
+    setPicking(null)
+    const { data: id, error } = await supabase.rpc('copy_workout', { src: src.id, to_athlete: athlete!.id, to_date: date })
+    if (error) return alert('Не получилось: ' + error.message)
+    const { data } = await supabase.from('workouts').update({ published: false }).eq('id', id).select('*, workout_items(*)').single()
+    await reload()
+    if (data) setEditing({ date, workout: data as Workout })
+  }
 
   if (athletes === null) return <p className="muted">Загрузка…</p>
   if (!athlete) return <p className="muted">Пока нет атлетов. Пригласите кого-нибудь во вкладке «Атлеты».</p>
@@ -107,7 +118,7 @@ export function Plan({ athleteId, week, open, me }: { athleteId?: string; week?:
               <Day key={d} date={d}>
                 <div className="day-head">{dayShort(d)} <span className="muted">{fmtShort(d)}</span></div>
                 {day.map((w) => (
-                  <WorkoutCard key={w.id} w={w} athletes={athletes} results={results}
+                  <WorkoutCard key={w.id} w={w} athletes={athletes} results={results} comments={comments}
                     onOpen={() => { setViewing(null); setEditing({ date: d, workout: w }) }}
                     onResults={() => { setEditing(null); setViewing(w.id) }} onChanged={() => { reload(); loadTemplates() }} />
                 ))}
@@ -116,16 +127,24 @@ export function Plan({ athleteId, week, open, me }: { athleteId?: string; week?:
                   <div className="suggest">
                     <button onClick={() => open()}>Пустая тренировка</button>
                     {templates.map((t) => <button key={t.id} onClick={() => open(t)}>Из шаблона: {t.title || 'Тренировка'}</button>)}
+                    <button onClick={() => { setAdding(null); setEditing(null); setViewing(null); setPicking(d) }}>Из другого дня</button>
                     <button onClick={() => setAdding(null)}>Отмена</button>
                   </div>
                 ) : (
-                  <button className="add-day" onClick={() => (templates.length ? setAdding(d) : open())} aria-label={`Добавить тренировку ${d}`}>+</button>
+                  <button className="add-day" onClick={() => setAdding(d)} aria-label={`Добавить тренировку ${d}`}>+</button>
                 )}
               </Day>
             )
           })}
         </div>
       </DndContext>
+
+      {picking && (
+        <section className="editor card">
+          <div className="row-between"><b>Из другого дня → {dayShort(picking)} {fmtShort(picking)}</b><button className="back" onClick={() => setPicking(null)}>✕</button></div>
+          <PickWorkout athleteId={athlete.id} monday={monday} onPick={(w) => take(w, picking)} onCancel={() => setPicking(null)} />
+        </section>
+      )}
 
       {viewing && workouts.some((w) => w.id === viewing) && (
         <section className="editor card">
@@ -173,8 +192,8 @@ function RemindNow() {
   )
 }
 
-function WorkoutCard({ w, athletes, results, onOpen, onResults, onChanged }: {
-  w: Workout; athletes: Athlete[]; results: SetResult[]; onOpen: () => void; onResults: () => void; onChanged: () => void
+function WorkoutCard({ w, athletes, results, comments, onOpen, onResults, onChanged }: {
+  w: Workout; athletes: Athlete[]; results: SetResult[]; comments: Comment[]; onOpen: () => void; onResults: () => void; onChanged: () => void
 }) {
   const [mode, setMode] = useState<'copy' | 'move' | null>(null)
   const [to, setTo] = useState(w.athlete_id)
@@ -191,7 +210,7 @@ function WorkoutCard({ w, athletes, results, onOpen, onResults, onChanged }: {
     onChanged()
   }
   const remove = () => {
-    const warn = mine.length ? '\n\nАтлет уже внёс результаты — они тоже удалятся.' : ''
+    const warn = mine.length || comments.some((c) => c.workout_id === w.id) ? '\n\nУ атлета есть результаты — удалятся вместе.' : ''
     if (confirm(`Удалить тренировку «${w.title || 'Тренировка'}»?${warn}`)) run(supabase.from('workouts').delete().eq('id', w.id))
   }
 

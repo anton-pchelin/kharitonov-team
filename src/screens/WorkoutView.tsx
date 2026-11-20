@@ -24,6 +24,7 @@ export type ViewProps = {
   onComment?: (itemId: string | null, text: string) => void
   onVideo?: (itemId: string, text: string, file: File) => Promise<void>  // атлет прикладывает видео подхода
   extra?: (item: WorkoutItem) => ReactNode  // доп. кнопки задания (видео, таймер — следующие этапы)
+  onDelete?: (item: WorkoutItem | null) => void  // атлет удаляет своё: задание «сам» или (null) свою тренировку
 }
 
 type Field = 'weight' | 'reps' | 'time_sec' | 'meters' | 'calories' | 'rounds'
@@ -52,7 +53,15 @@ export function WorkoutView(p: ViewProps) {
 
   return (
     <article className="workout">
-      <h3>{p.workout.title || 'Тренировка'} {p.workout.self && <span className="tag">сам</span>}</h3>
+      <div className="row-between">
+        <h3>{p.workout.title || 'Тренировка'} {p.workout.self && <span className="tag">сам</span>}</h3>
+        {p.workout.self && p.onDelete && (
+          <details className="menu">
+            <summary aria-label="Меню тренировки">⋯</summary>
+            <div className="menu-list"><button onClick={() => p.onDelete!(null)}>Удалить</button></div>
+          </details>
+        )}
+      </div>
       {p.workout.prescription && <Markup text={p.workout.prescription} />}
       {plan.map((it, i) => (
         <ItemView key={it.id} {...p} item={it} label={labels[i]}
@@ -88,6 +97,9 @@ function ItemView(p: ViewProps & { item: WorkoutItem; label: string; note: strin
         ) : <b className="item-label">{p.label}</b>}
         <b className="task-name">{item.name}</b>
         {item.result_type !== 'check' && <span className="muted">{item.planned_sets}× {resultLabel(item.result_type)}</span>}
+        {item.self && !p.workout.self && p.onDelete && (
+          <button className="link-btn" onClick={() => p.onDelete!(item)} aria-label={`Удалить «${item.name}»`}>Удалить</button>
+        )}
       </div>
       {item.pct != null && <PctHint {...p} item={item} />}
       <Markup text={item.plan_text} />

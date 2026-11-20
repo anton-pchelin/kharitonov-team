@@ -35,6 +35,8 @@ export type Op =
   | { t: 'complete'; id: string; at: string }
   | { t: 'record'; row: MaxRecord & { id: string; athlete_id: string } }
   | { t: 'video'; row: Comment }  // файл лежит в IndexedDB под ключом row.id
+  | { t: 'delete_workout'; id: string }  // только своя тренировка атлета
+  | { t: 'delete_item'; id: string; workout_id: string }  // только своё задание («+ моё упражнение»)
 
 const empty = (): Cache => ({ workouts: [], results: [], comments: [], history: [], records: [], syncedAt: null })
 const sameSet = (a: { item_id: string; set_no: number }, b: { item_id: string; set_no: number }) =>
@@ -55,6 +57,20 @@ export function applyLocal(c: Cache, op: Op): Cache {
     case 'complete': return { ...c, workouts: c.workouts.map((w) => (w.id === op.id ? { ...w, completed_at: w.completed_at ?? op.at } : w)) }
     case 'record': return { ...c, records: [...(c.records ?? []), op.row] }
     case 'video': return c.comments.some((x) => x.id === op.row.id) ? c : { ...c, comments: [...c.comments, { ...op.row, video_path: 'local:' + op.row.id }] }
+    case 'delete_workout': {
+      const items = new Set(c.workouts.find((w) => w.id === op.id)?.workout_items?.map((i) => i.id))
+      return {
+        ...c,
+        workouts: c.workouts.filter((w) => w.id !== op.id),
+        results: c.results.filter((r) => !items.has(r.item_id)),
+        comments: c.comments.filter((x) => x.workout_id !== op.id),
+      }
+    }
+    case 'delete_item': return {
+      ...c,
+      workouts: c.workouts.map((w) => (w.id === op.workout_id ? { ...w, workout_items: w.workout_items?.filter((i) => i.id !== op.id) } : w)),
+      results: c.results.filter((r) => r.item_id !== op.id),
+    }
   }
 }
 
@@ -72,6 +88,8 @@ async function send(op: Op, userId: string): Promise<{ error: { code?: string; m
     case 'item': return supabase.from('workout_items').upsert({ ...op.row, self: true }, { onConflict: 'id', ignoreDuplicates: true })
     case 'complete': return supabase.rpc('complete_workout', { p_id: op.id, p_at: op.at })
     case 'record': return supabase.from('records').upsert(op.row, { onConflict: 'id', ignoreDuplicates: true })
+    case 'delete_workout': return supabase.from('workouts').delete().eq('id', op.id).eq('self', true)
+    case 'delete_item': return supabase.from('workout_items').delete().eq('id', op.id).eq('self', true)
     case 'video': {
       const blob = await getBlob(op.row.id)
       if (!blob) return { error: null }  // уже ушло раньше

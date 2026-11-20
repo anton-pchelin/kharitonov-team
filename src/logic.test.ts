@@ -61,6 +61,16 @@ describe('конструктор тренировки', async () => {
     expect(embedUrl('https://www.youtube.com/watch?v=xyz&t=1')).toBe('https://www.youtube.com/embed/xyz')
     expect(embedUrl('https://example.com/video.mp4')).toBeNull()
   })
+  it('вставка из другой тренировки продолжает номера, суперсеты не сливаются', async () => {
+    const { appendItems } = await import('./lib/workout')
+    const mk = (id: string, superset: number | null, self = false) => ({ id, position: 0, exercise_id: null, name: id, plan_text: '', video_url: null, result_type: 'reps' as const, planned_sets: 1, superset, block_note: '', self })
+    const mine = [mk('a', null), mk('b', 1), mk('c', 1)]
+    const other = [mk('d', 1), mk('e', 1), mk('f', null), mk('сам', null, true)]
+    const all = appendItems(mine, other)
+    expect(itemLabels(all)).toEqual(['1', '2А', '2Б', '3А', '3Б', '4'])
+    expect(all.map((i) => i.position)).toEqual([0, 0, 0, 3, 4, 5])
+    expect(all.slice(3).every((i) => !['d', 'e', 'f'].includes(i.id))).toBe(true)  // новые id
+  })
   it('считает недели с понедельника', () => {
     expect(mondayOf('2026-11-15')).toBe('2026-11-09')
     expect(mondayOf('2026-11-09')).toBe('2026-11-09')
@@ -86,6 +96,17 @@ describe('без интернета', async () => {
     c = applyLocal(c, { t: 'complete', id: 'w', at: '2026-11-09T10:00:00Z' })
     expect(c.workouts[0].workout_items).toHaveLength(1)
     expect(c.workouts[0].completed_at).toBe('2026-11-09T10:00:00Z')
+  })
+  it('удаление своей тренировки и своего задания убирает и подходы', () => {
+    const item = { id: 'x', workout_id: 'w', position: 1000, exercise_id: null, name: 'Бицепс', plan_text: '', video_url: null, result_type: 'weight_reps' as const, planned_sets: 3, superset: null, block_note: '', self: true }
+    let c = applyLocal(base, { t: 'item', row: item })
+    c = applyLocal(c, { t: 'set', row: { item_id: 'x', set_no: 1, weight: 10, done: true } })
+    const noItem = applyLocal(c, { t: 'delete_item', id: 'x', workout_id: 'w' })
+    expect(noItem.workouts[0].workout_items).toEqual([])
+    expect(noItem.results).toEqual([])
+    const noWorkout = applyLocal(c, { t: 'delete_workout', id: 'w' })
+    expect(noWorkout.workouts).toEqual([])
+    expect(noWorkout.results).toEqual([])
   })
   it('«прошлый раз» — последняя более ранняя тренировка с тем же упражнением', () => {
     const h = (date: string, set_no: number, weight: number) => ({ item_id: date, set_no, weight, reps: 10, done: true, date, name: 'Присед', exercise_id: 'sq' })
