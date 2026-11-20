@@ -63,7 +63,7 @@ export function AthleteCard({ id }: { id: string }) {
           <div className="row">
             <input type="date" defaultValue={until ?? ''} aria-label="Доступ до"
               onChange={(e) => e.target.value && saveUntil(e.target.value)} />
-            <button className="btn secondary" onClick={() => saveUntil(null)}>Без срока</button>
+            <button className="btn secondary" onClick={() => saveUntil(null)}>Стереть дату</button>
           </div>
         )}
       </div>
