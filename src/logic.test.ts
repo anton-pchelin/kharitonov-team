@@ -209,3 +209,31 @@ describe('доступ по оплате', async () => {
     expect(addMonth('2027-01-31')).toBe('2027-02-28')
   })
 })
+
+describe('сигналы таймера', async () => {
+  const { timerCues } = await import('./lib/timer')
+  const at = (cues: [number, string][], from: number, to: number) => cues.filter(([t]) => t >= from && t < to)
+
+  it('табата 20/10 × 8: только 5…1 в каждом отрезке, старт и финиш', () => {
+    const c = timerCues({ kind: 'tabata', work: 20, rest: 10, rounds: 8 })
+    expect(c[0]).toEqual([0, 'start'])
+    expect(c[c.length - 1]).toEqual([240, 'finish'])
+    expect(c.some(([, q]) => q === 'half' || q === 'ten')).toBe(false)
+    expect(at(c, 1, 30)).toEqual([[15, '5'], [16, '4'], [17, '3'], [18, '2'], [19, '1'], [20, 'next'], [25, '5'], [26, '4'], [27, '3'], [28, '2'], [29, '1']])
+    expect(c.filter(([, q]) => q === '1')).toHaveLength(16)
+  })
+  it('EMOM 12 мин: в каждой минуте «Половина» на 30-й, «10 секунд», 5…1', () => {
+    const c = timerCues({ kind: 'emom', minutes: 12 })
+    expect(at(c, 1, 60)).toEqual([[30, 'half'], [50, 'ten'], [55, '5'], [56, '4'], [57, '3'], [58, '2'], [59, '1']])
+    expect(c.filter(([, q]) => q === 'half').map(([t]) => t)).toEqual(Array.from({ length: 12 }, (_, i) => i * 60 + 30))
+    expect(c[c.length - 1]).toEqual([720, 'finish'])
+  })
+  it('АМРАП 12 мин: «Половина» на 6:00, «10 секунд» и 5…1 перед концом', () => {
+    expect(timerCues({ kind: 'amrap', minutes: 12 })).toEqual([[0, 'start'], [360, 'half'], [710, 'ten'],
+      [715, '5'], [716, '4'], [717, '3'], [718, '2'], [719, '1'], [720, 'finish']])
+  })
+  it('«на время» с лимитом 10 мин — от лимита; выключенные сигналы не звучат', () => {
+    expect(timerCues({ kind: 'fortime', minutes: 10 }).filter(([, q]) => q === 'half')).toEqual([[300, 'half']])
+    expect(timerCues({ kind: 'amrap', minutes: 12 }, { half: false, ten: true, count: false })).toEqual([[0, 'start'], [710, 'ten'], [720, 'finish']])
+  })
+})

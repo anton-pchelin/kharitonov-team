@@ -105,7 +105,7 @@ export function Today({ profile, date: routeDate }: { profile: Profile; date?: s
 
       {editable && <AddOwnWorkout onAdd={addOwnWorkout} />}
       {timer?.timer && (
-        <Timer id={timer.id} cfg={timer.timer} title={timer.name} onClose={() => setTimer(null)}
+        <Timer id={timer.id} cfg={timer.timer} title={timer.name} task={[timer.block_note, timer.plan_text].filter(Boolean).join('\n\n')} onClose={() => setTimer(null)}
           onResult={(r) => store.do({ t: 'set', row: { ...(data.results.find((x) => x.item_id === timer.id && x.set_no === 1) ?? {}), item_id: timer.id, set_no: 1, ...r } })} />
       )}
     </>
