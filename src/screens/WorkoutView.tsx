@@ -192,7 +192,7 @@ function Comments(p: ViewProps & { itemId: string | null; list: Comment[] }) {
     <div className="comments">
       {p.list.map((c) => (
         <div key={c.id} className={'comment' + (c.author_id === p.me ? ' mine' : '')}>
-          💬 {c.author_id !== p.me && <b>{p.names[c.author_id] ?? ''}: </b>}{c.text}
+          💬 {c.author_id !== p.me && <b>{p.names[c.author_id] ?? ''}: </b>}<span className="pre">{c.text}</span>
           {c.video_path?.startsWith('local:') && <small className="muted"> 🎬 видео отправится, когда появится сеть</small>}
           {c.video_path && !c.video_path.startsWith('local:') && <CommentVideo path={c.video_path} />}
           {c.video_deleted && <small className="muted"> 🎬 видео удалено (старше 30 дней)</small>}
