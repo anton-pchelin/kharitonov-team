@@ -7,6 +7,9 @@ if (!url || !key) throw new Error('Нет VITE_SUPABASE_URL / VITE_SUPABASE_ANON
 
 export const supabase = createClient(url, key)
 
+/** id вошедшего (из сохранённой сессии, без запроса к серверу). */
+export const myId = async () => (await supabase.auth.getSession()).data.session?.user.id ?? ''
+
 export type Profile = {
   id: string
   role: 'coach' | 'athlete'

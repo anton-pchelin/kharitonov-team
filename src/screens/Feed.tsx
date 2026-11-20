@@ -19,7 +19,7 @@ export function Feed({ me }: { me: { id: string; name: string } }) {
 
   const load = useCallback(async () => {
     const { data } = await supabase.from('workouts').select('*, workout_items(*), profiles!workouts_athlete_id_fkey(name)')
-      .gte('date', addDays(today(), -14)).lte('date', today()).order('date', { ascending: false })
+      .neq('athlete_id', me.id).gte('date', addDays(today(), -14)).lte('date', today()).order('date', { ascending: false })
     const ws = (data ?? []) as W[]
     const ids = ws.map((w) => w.id)
     const itemIds = ws.flatMap((w) => (w.workout_items ?? []).map((i) => i.id))

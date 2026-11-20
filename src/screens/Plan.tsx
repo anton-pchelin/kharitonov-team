@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react'
-import { supabase } from '../supabase'
+import { myId, supabase } from '../supabase'
 import type { Exercise } from '../search'
 import { loadExercises } from './Exercises'
 import { WorkoutEditor, snapshot } from './WorkoutEditor'
@@ -14,7 +14,7 @@ import { WorkoutView, progress } from './WorkoutView'
 type Athlete = { id: string; name: string }
 
 export async function loadMyAthletes(): Promise<Athlete[]> {
-  const { data } = await supabase.from('coach_athletes').select('athlete_id, profiles!coach_athletes_athlete_id_fkey(name)')
+  const { data } = await supabase.from('coach_athletes').select('athlete_id, profiles!coach_athletes_athlete_id_fkey(name)').eq('coach_id', await myId())
   return ((data ?? []) as unknown as { athlete_id: string; profiles: { name: string } | null }[])
     .map((r) => ({ id: r.athlete_id, name: r.profiles?.name || 'Без имени' }))
     .sort((a, b) => a.name.localeCompare(b.name, 'ru'))
@@ -140,14 +140,14 @@ export function Plan({ athleteId, week, open, me }: { athleteId?: string; week?:
       </DndContext>
 
       {picking && (
-        <section className="editor card">
+        <section className="editor card" key={picking} ref={toTop}>
           <div className="row-between"><b>Из другого дня → {dayShort(picking)} {fmtShort(picking)}</b><button className="back" onClick={() => setPicking(null)}>✕</button></div>
           <PickWorkout athleteId={athlete.id} monday={monday} onPick={(w) => take(w, picking)} onCancel={() => setPicking(null)} />
         </section>
       )}
 
       {viewing && workouts.some((w) => w.id === viewing) && (
-        <section className="editor card">
+        <section className="editor card" key={viewing} ref={toTop}>
           <div className="row-between"><b>Результаты — {athlete.name}</b><button className="back" onClick={() => setViewing(null)}>✕</button></div>
           <WorkoutView workout={workouts.find((w) => w.id === viewing)!} results={results} comments={comments} history={[]}
             me={me.id} names={{ [me.id]: me.name, [athlete.id]: athlete.name }} editable={false}
@@ -170,6 +170,9 @@ export function Plan({ athleteId, week, open, me }: { athleteId?: string; week?:
 }
 
 type Template = { id: string; title: string; prescription: string; items: WorkoutItem[] }
+
+/** На телефоне блоки под неделей не видно — прокручиваем к ним при открытии. */
+const toTop = (el: HTMLElement | null) => el?.scrollIntoView({ block: 'start' })
 
 function Day({ date, children }: { date: string; children: ReactNode }) {
   const { setNodeRef, isOver } = useDroppable({ id: date })

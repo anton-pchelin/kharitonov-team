@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { supabase } from '../supabase'
+import { myId, supabase } from '../supabase'
 import { addDays, fmtDM, today } from '../lib/dates'
 import { loadGroups } from './WeekTools'
 
@@ -22,14 +22,15 @@ export function Athletes() {
   }, [])
 
   useEffect(() => {
-    supabase
+    myId().then((me) => supabase
       .from('coach_athletes')
       .select('athlete_id, access_until, profiles!coach_athletes_athlete_id_fkey(name, email, city)')
+      .eq('coach_id', me)
       .order('created_at', { ascending: false })
       .then(({ data, error }) => {
         if (error) alert('Не загрузилось: ' + error.message)
         setRows((data as unknown as Row[]) ?? [])
-      })
+      }))
   }, [])
 
   const invite = async () => {

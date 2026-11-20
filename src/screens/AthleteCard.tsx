@@ -38,7 +38,7 @@ export function AthleteCard({ id }: { id: string }) {
 
   if (!p) return <p className="muted">Загрузка…</p>
   const rows: [string, string][] = [
-    ['Email', p.email ?? ''], ['Город', p.city], ['Часовой пояс', p.timezone],
+    ['Город', p.city], ['Часовой пояс', p.timezone],
     ['Цели', p.goals], ['Оборудование', p.equipment], ['Ограничения по здоровью', p.health_limits],
   ]
   return (
@@ -63,7 +63,7 @@ export function AthleteCard({ id }: { id: string }) {
           <div className="row">
             <input type="date" defaultValue={until ?? ''} aria-label="Доступ до"
               onChange={(e) => e.target.value && saveUntil(e.target.value)} />
-            <button className="btn secondary" onClick={() => saveUntil(null)}>Стереть дату</button>
+            <button className="btn secondary" onClick={() => saveUntil(null)}>Без срока</button>
           </div>
         )}
       </div>

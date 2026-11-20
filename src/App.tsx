@@ -20,7 +20,7 @@ const INVITE_KEY = 'inviteToken'
 const ACCESS_KEY = 'access'  // последний известный срок доступа — для работы без сети
 const VIEW_KEY = 'viewAs'  // тренер, у которого есть свой тренер, открывает приложение как атлет
 
-type Access = { coach_id: string; until: string | null; coach_username: string | null } | null
+type Access = { coach_id: string; until: string | null; coach_username: string | null; coach_telegram_id?: number | null } | null
 
 const INVITE_ERRORS: Record<string, string> = {
   invalid: 'Ссылка-приглашение не найдена. Попросите тренера новую ссылку.',
@@ -151,7 +151,8 @@ export function App() {
           <h2>Доступ закончился {fmtDM(access!.until!)}</h2>
           <p className="muted">Чтобы продолжить, оплатите занятия у тренера</p>
           {queued > 0 && <p className="error">Не отправлено: доступ закончился ({queued}). Отправится после продления.</p>}
-          {access!.coach_username && <a className="btn" href={`https://t.me/${access!.coach_username}`} target="_blank" rel="noreferrer">Написать тренеру</a>}
+          {(access!.coach_username || access!.coach_telegram_id) && <a className="btn" target="_blank" rel="noreferrer"
+            href={access!.coach_username ? `https://t.me/${access!.coach_username}` : `tg://user?id=${access!.coach_telegram_id}`}>Написать тренеру</a>}
           {realCoach && <button className="btn secondary" onClick={() => switchView(false)}>Перейти в режим тренера</button>}
           <button className="btn secondary" onClick={() => supabase.auth.signOut()}>Выйти</button>
         </main>
