@@ -14,9 +14,13 @@ import { Progress } from './screens/Progress'
 import { Programs } from './screens/Programs'
 import { Feed } from './screens/Feed'
 import { Icon, type IconName } from './lib/icons'
+import { daysBetween, fmtDM, today } from './lib/dates'
 
 const INVITE_KEY = 'inviteToken'
+const ACCESS_KEY = 'access'  // последний известный срок доступа — для работы без сети
 const VIEW_KEY = 'viewAs'  // тренер, у которого есть свой тренер, открывает приложение как атлет
+
+type Access = { coach_id: string; until: string | null; coach_username: string | null } | null
 
 const INVITE_ERRORS: Record<string, string> = {
   invalid: 'Ссылка-приглашение не найдена. Попросите тренера новую ссылку.',
@@ -49,7 +53,7 @@ export function App() {
   const route = useRoute()
   const [session, setSession] = useState<Session | null | undefined>(undefined)
   const [profile, setProfile] = useState<Profile | null>(null)
-  const [hasCoach, setHasCoach] = useState(false)
+  const [access, setAccess] = useState<Access>(null)
   const [inviteError, setInviteError] = useState('')
   const [invite, setInvite] = useState(() => localStorage.getItem(INVITE_KEY))
   const [asAthlete, setAsAthlete] = useState(() => localStorage.getItem(VIEW_KEY) === 'athlete')
@@ -79,12 +83,17 @@ export function App() {
         localStorage.removeItem(INVITE_KEY)
         setInvite(null)
       }
-      const [{ data: p }, { data: coachId }] = await Promise.all([
+      const [{ data: p }, acc] = await Promise.all([
         supabase.from('profiles').select('*').eq('id', userId).single(),
-        supabase.rpc('my_coach_id'),
+        supabase.rpc('my_access'),
       ])
       setProfile(p)
-      setHasCoach(!!coachId)
+      if (acc.error) {
+        try { setAccess(JSON.parse(localStorage.getItem(ACCESS_KEY) ?? 'null')) } catch { /* нет сохранённого */ }
+      } else {
+        setAccess(acc.data as Access)
+        localStorage.setItem(ACCESS_KEY, JSON.stringify(acc.data))
+      }
       if (p) saveLocalTheme(p.palette, p.theme)
     })()
   }, [userId, invite])
@@ -106,6 +115,7 @@ export function App() {
 
   if (!profile.name) return <MyProfile profile={profile} onSave={update} first />
 
+  const hasCoach = !!access
   const realCoach = profile.role === 'coach'
   const isCoach = realCoach && !asAthlete
   // экраны видят роль, в которой тренер сейчас смотрит приложение
@@ -124,6 +134,25 @@ export function App() {
           <h2>Вас пока не пригласил тренер</h2>
           {inviteError && <p className="error">{inviteError}</p>}
           <p className="muted">Попросите у тренера ссылку-приглашение и откройте её на этом телефоне.</p>
+          <button className="btn secondary" onClick={() => supabase.auth.signOut()}>Выйти</button>
+        </main>
+      </div>
+    )
+  }
+
+  // срок доступа — только для режима атлета; «до 20.12» значит, что 20.12 ещё можно
+  const daysLeft = !isCoach && access?.until ? daysBetween(today(), access.until) : null
+  if (daysLeft !== null && daysLeft < 0) {
+    const queued = (() => { try { return JSON.parse(localStorage.getItem(`queue:v1:${profile.id}`) ?? '[]').length as number } catch { return 0 } })()
+    return (
+      <div className="page">
+        <header className="top"><Logo /></header>
+        <main className="center">
+          <h2>Доступ закончился {fmtDM(access!.until!)}</h2>
+          <p className="muted">Чтобы продолжить, оплатите занятия у тренера</p>
+          {queued > 0 && <p className="error">Не отправлено: доступ закончился ({queued}). Отправится после продления.</p>}
+          {access!.coach_username && <a className="btn" href={`https://t.me/${access!.coach_username}`} target="_blank" rel="noreferrer">Написать тренеру</a>}
+          {realCoach && <button className="btn secondary" onClick={() => switchView(false)}>Перейти в режим тренера</button>}
           <button className="btn secondary" onClick={() => supabase.auth.signOut()}>Выйти</button>
         </main>
       </div>
@@ -157,6 +186,9 @@ export function App() {
       </aside>
       <main>
         {inviteError && <p className="error">{inviteError}</p>}
+        {tab === 'today' && daysLeft !== null && daysLeft <= 7 && (
+          <p className="card">Доступ до {fmtDM(access!.until!)} — {daysLeft === 0 ? 'сегодня последний день' : `осталось ${daysLeft} ${daysLeft === 1 ? 'день' : daysLeft < 5 ? 'дня' : 'дней'}`}. Не забудьте оплатить</p>
+        )}
         {tab === 'feed' && isCoach && <Feed me={shown} />}
         {tab === 'athletes' && <Athletes />}
         {tab === 'athlete' && isCoach && <AthleteCard id={route[1]} />}

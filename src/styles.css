@@ -71,6 +71,7 @@ input:focus, textarea:focus, select:focus { outline: 2px solid var(--primary); o
 .muted { color: var(--muted); font-weight: 400; }
 .note { padding: 12px 14px; border-radius: var(--radius); background: var(--done-bg); }
 .error { padding: 12px 14px; border-radius: var(--radius); background: #FDE2E1; color: #8A1C17; }
+.danger { color: #E5484D; font-weight: 600; }  /* красный текст: читается и в светлой, и в тёмной теме */
 
 .ex-list { display: flex; flex-direction: column; }
 .ex-item { display: flex; gap: 12px; align-items: center; cursor: pointer; }

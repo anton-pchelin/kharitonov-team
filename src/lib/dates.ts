@@ -19,3 +19,18 @@ export const dayShort = (s: string) => DAY_SHORT[(parseIso(s).getDay() + 6) % 7]
 export const fmtDay = (s: string) =>
   new Intl.DateTimeFormat('ru-RU', { weekday: 'short', day: 'numeric', month: 'long' }).format(parseIso(s))
 export const fmtShort = (s: string) => new Intl.DateTimeFormat('ru-RU', { day: 'numeric', month: 'short' }).format(parseIso(s))
+
+/** +1 месяц; 31.01 → 28.02 (последний день, если такого числа нет). */
+export function addMonth(s: string): string {
+  const d = parseIso(s)
+  const day = d.getDate()
+  d.setDate(1)
+  d.setMonth(d.getMonth() + 1)
+  d.setDate(Math.min(day, new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate()))
+  return iso(d)
+}
+/** «+1 мес» к доступу: от даты окончания, а если срок прошёл или его не было — от сегодня. */
+export const extendAccess = (until: string | null, now = today()) => addMonth(until && until >= now ? until : now)
+export const daysBetween = (a: string, b: string) => Math.round((parseIso(b).getTime() - parseIso(a).getTime()) / 864e5)
+/** '2026-12-20' → '20.12' */
+export const fmtDM = (s: string) => `${s.slice(8, 10)}.${s.slice(5, 7)}`

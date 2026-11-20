@@ -16,6 +16,7 @@ declare
   base_id uuid;
   w_pub uuid; w_draft uuid; w_self uuid; it uuid; it_draft uuid; w_old uuid; prog uuid; mon date := public.monday(current_date + 14);
   n int;
+  d date; at20 timestamptz;
   t text;
 begin
   select count(*) into n from public.exercises where source = 'base';
@@ -384,6 +385,59 @@ begin
   perform set_config('request.jwt.claims', json_build_object('sub', coach2, 'role', 'authenticated')::text, true);
   select count(*) into n from storage.objects where bucket_id = 'videos' and name like a1 || '/%';
   assert n = 0, 'чужой тренер видит видео';
+
+  -- Доступ по оплате: срок ставит только тренер; истёк — атлет не читает и не пишет тренировки
+  perform set_config('role', 'authenticated', true);
+  perform set_config('request.jwt.claims', json_build_object('sub', a1, 'role', 'authenticated')::text, true);
+  update public.coach_athletes set access_until = current_date + 365 where athlete_id = a1;
+  get diagnostics n = row_count;
+  assert n = 0, 'атлет сам поставил себе срок';
+  assert public.has_access(a1), 'без срока доступ должен быть';
+  perform set_config('request.jwt.claims', json_build_object('sub', coach1, 'role', 'authenticated')::text, true);
+  update public.coach_athletes set access_until = public.local_today(a1) - 1 where athlete_id = a1;
+  get diagnostics n = row_count;
+  assert n = 1, 'тренер не смог поставить срок';
+  perform set_config('request.jwt.claims', json_build_object('sub', a1, 'role', 'authenticated')::text, true);
+  assert (public.my_access() ->> 'until')::date = public.local_today(a1) - 1, 'атлет не видит свой срок';
+  select count(*) into n from public.workouts where athlete_id = a1;
+  assert n = 0, 'атлет с истёкшим сроком видит тренировки';
+  select count(*) into n from public.workout_items;
+  assert n = 0, 'атлет с истёкшим сроком видит задания';
+  select count(*) into n from public.comments;
+  assert n = 0, 'атлет с истёкшим сроком видит комментарии';
+  begin
+    insert into public.set_results (item_id, set_no, weight) values (it, 9, 1);
+    assert false, 'атлет с истёкшим сроком записал подход';
+  exception when insufficient_privilege then null;
+  end;
+  begin
+    insert into public.workouts (athlete_id, date, self, published) values (a1, current_date, true, true);
+    assert false, 'атлет с истёкшим сроком создал свою тренировку';
+  exception when insufficient_privilege then null;
+  end;
+  begin
+    insert into public.comments (workout_id, text) values (w_pub, 'после срока');
+    assert false, 'атлет с истёкшим сроком написал комментарий';
+  exception when insufficient_privilege then null;
+  end;
+  perform set_config('request.jwt.claims', json_build_object('sub', coach1, 'role', 'authenticated')::text, true);
+  select count(*) into n from public.workouts where athlete_id = a1;
+  assert n > 0, 'тренер не видит тренировки атлета с истёкшим сроком';
+  perform public.save_workout(json_build_object('athlete_id', a1, 'date', current_date + 3, 'title', 'вперёд', 'published', true)::jsonb,
+    json_build_array(json_build_object('id', gen_random_uuid(), 'position', 0, 'name', 'Присед', 'result_type', 'weight_reps', 'planned_sets', 1))::jsonb);
+  -- напоминания: за 7 дней и в последний день, в 20:00 по времени атлета; за 5 дней — нет
+  perform set_config('role', 'none', true);
+  update public.profiles set telegram_id = 990000777, timezone = 'Europe/Moscow' where id = a1;
+  d := (now() at time zone 'Europe/Moscow')::date;
+  at20 := (d + time '20:00') at time zone 'Europe/Moscow';
+  foreach n in array array[7, 5, 0] loop
+    update public.coach_athletes set access_until = d + n where athlete_id = a1;
+    perform public.enqueue_access_reminders(at20);
+    perform public.enqueue_access_reminders(at20 - interval '3 hours');  -- не 20:00 — ничего
+  end loop;
+  select count(*) into n from public.notifications where user_id = a1 and dedup like 'access:%';
+  assert n = 2, 'напоминаний об оплате должно быть 2 (за 7 дней и в последний), есть: ' || n;
+  update public.coach_athletes set access_until = null where athlete_id = a1;
 
   -- Связь «сам себе атлет» запрещена
   perform set_config('role', 'none', true);

@@ -177,3 +177,14 @@ it('подбор веса и повторов под прошлый подход
   expect(matchSet(prev, { weight: 90, reps: 3 })).toEqual({})
   expect(matchSet({ weight: null, reps: 10 }, { reps: 5 })).toEqual({})
 })
+
+describe('доступ по оплате', async () => {
+  const { extendAccess, addMonth } = await import('./lib/dates')
+  it('+1 мес от даты окончания, а прошедший или пустой срок — от сегодня', () => {
+    expect(extendAccess('2026-12-20', '2026-12-15')).toBe('2027-01-20')
+    expect(extendAccess('2026-12-20', '2026-12-20')).toBe('2027-01-20')
+    expect(extendAccess('2026-12-20', '2026-12-25')).toBe('2027-01-25')
+    expect(extendAccess(null, '2026-11-20')).toBe('2026-12-20')
+    expect(addMonth('2027-01-31')).toBe('2027-02-28')
+  })
+})
