@@ -85,7 +85,14 @@ begin
   perform set_config('role', 'none', true);
   insert into public.invites (coach_id) values (coach1) returning token into inv_old;
   perform set_config('role', 'authenticated', true);
-  assert public.accept_invite(inv_old) = 'is_coach', 'тренер принял приглашение как атлет';
+  assert public.accept_invite(inv3) = 'own_invite', 'тренер принял своё же приглашение';
+  -- тренер может заниматься у другого тренера и остаётся тренером
+  assert public.accept_invite(inv_old) = 'ok', 'тренер не принял приглашение другого тренера';
+  assert public.my_coach_id() = coach1, 'тренер 2 не стал атлетом тренера 1';
+  assert public.is_coach(), 'тренер 2 потерял роль тренера';
+  perform set_config('role', 'none', true);
+  delete from public.coach_athletes where athlete_id = coach2;  -- дальше проверки считают атлетов тренера 1
+  perform set_config('role', 'authenticated', true);
 
   -- Атлет: прямые запросы к базе
   perform set_config('request.jwt.claims', json_build_object('sub', a1, 'role', 'authenticated')::text, true);
@@ -378,16 +385,13 @@ begin
   select count(*) into n from storage.objects where bucket_id = 'videos' and name like a1 || '/%';
   assert n = 0, 'чужой тренер видит видео';
 
-  -- Атлет не может стать «тренером самому себе»; тренер — может (режим «смотреть как атлет»)
-  perform set_config('request.jwt.claims', json_build_object('sub', a1, 'role', 'authenticated')::text, true);
-  perform public.coach_self_link();
-  perform set_config('request.jwt.claims', json_build_object('sub', coach1, 'role', 'authenticated')::text, true);
-  perform public.coach_self_link();
+  -- Связь «сам себе атлет» запрещена
   perform set_config('role', 'none', true);
-  select count(*) into n from public.coach_athletes where coach_id = a1;
-  assert n = 0, 'атлет привязал себя как тренер';
-  select count(*) into n from public.coach_athletes where coach_id = coach1 and athlete_id = coach1;
-  assert n = 1, 'тренер не стал атлетом у себя';
+  begin
+    insert into public.coach_athletes (coach_id, athlete_id) values (coach1, coach1);
+    assert false, 'тренер стал атлетом у себя';
+  exception when check_violation then null;
+  end;
 
   -- Без входа ничего не видно
   perform set_config('role', 'anon', true);

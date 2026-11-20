@@ -35,7 +35,7 @@ function Row({ label, hint, children }: { label: ReactNode; hint?: ReactNode; ch
  */
 export function Settings({ profile, onChange, onSwitchView }: {
   profile: Profile; onChange: (p: Partial<Profile>) => Promise<void>
-  /** есть только у тренера: смотреть приложение как атлет */
+  /** есть только у тренера, который сам занимается у другого тренера: режим «Атлет» */
   onSwitchView?: (athlete: boolean) => void
 }) {
   const isCoach = profile.role === 'coach'
@@ -47,9 +47,9 @@ export function Settings({ profile, onChange, onSwitchView }: {
   const sections: Section[] = [
     ['account', 'Учётная запись', 'user', (
       <div className="group">
-        <Row label={profile.name || 'Без имени'} hint={onSwitchView ? 'тренер' : 'атлет'} />
+        <Row label={profile.name || 'Без имени'} hint={isCoach ? 'тренер' : 'атлет'} />
         {onSwitchView && (
-          <Row label="Смотреть как" hint="как атлет вы видите тренировки, которые назначили себе">
+          <Row label="Режим" hint="как атлет вы видите тренировки от своего тренера">
             <div className="segmented">
               <button className={isCoach ? 'active' : ''} onClick={() => onSwitchView(false)}>Тренер</button>
               <button className={isCoach ? '' : 'active'} onClick={() => onSwitchView(true)}>Атлет</button>
