@@ -3,7 +3,7 @@ import { supabase } from '../supabase'
 import { Markup } from '../lib/markup'
 import { Video } from '../lib/video'
 import { fmtNum, fmtTime, parseNum, parseTime } from '../lib/format'
-import { itemLabels, resultLabel, type ResultType, type Workout, type WorkoutItem } from '../lib/workout'
+import { isComplex, itemLabels, resultLabel, type ResultType, type Workout, type WorkoutItem } from '../lib/workout'
 import { previousSets, type Comment, type PastSet, type SetResult } from '../lib/offline'
 import { exerciseKey, isRecordSet, matchSet, maxFor, pctWeight, type MaxRecord } from '../lib/progress'
 import { platesFor } from '../lib/plates'
@@ -97,7 +97,7 @@ function ItemView(p: ViewProps & { item: WorkoutItem; label: string; note: strin
             onClick={() => put(1, { done: !mine[0]?.done })}>✓</button>
         ) : <b className="item-label">{p.label}</b>}
         <b className="task-name">{item.name}</b>
-        {item.result_type !== 'check' && <span className="muted">{item.planned_sets}× {resultLabel(item.result_type)}</span>}
+        {item.result_type !== 'check' && <span className="muted">{isComplex(item) ? '' : `${item.planned_sets}× `}{resultLabel(item.result_type)}</span>}
         {item.self && !p.workout.self && p.onDelete && (
           <button className="link-btn" onClick={() => p.onDelete!(item)} aria-label={`Удалить «${item.name}»`}>Удалить</button>
         )}

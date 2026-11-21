@@ -277,3 +277,22 @@ describe('кардио', async () => {
     expect(pace500(row('2026-11-21', 1800, 0, 140))).toBeNull()
   })
 })
+
+describe('комплекс', () => {
+  it('название из числа раундов и обратно', async () => {
+    const { complexName, complexRounds, isComplex } = await import('./lib/workout')
+    expect([1, 2, 5, 11, 21, 22, 112].map(complexName)).toEqual(['Комплекс · 1 раунд', 'Комплекс · 2 раунда', 'Комплекс · 5 раундов',
+      'Комплекс · 11 раундов', 'Комплекс · 21 раунд', 'Комплекс · 22 раунда', 'Комплекс · 112 раундов'])
+    expect(complexName(null)).toBe('Комплекс')
+    expect(complexRounds('Комплекс · 7 раундов')).toBe(7)
+    expect(complexRounds('Комплекс')).toBeNull()
+    expect(isComplex({ name: 'Комплекс · 3 раунда', exercise_id: null })).toBe(true)
+    expect(isComplex({ name: 'Комплексная разминка', exercise_id: null })).toBe(false)
+    expect(isComplex({ name: 'Комплекс', exercise_id: 'x' })).toBe(false)
+  })
+  it('у комплекса нет подсказки «прошлый раз»', async () => {
+    const { previousSets } = await import('./lib/offline')
+    const past = [{ item_id: 'a', set_no: 1, done: true, time_sec: 600, name: 'Комплекс · 5 раундов', exercise_id: null, date: '2026-11-01' }]
+    expect(previousSets(past, { name: 'Комплекс · 5 раундов', exercise_id: null }, '2026-11-10')).toEqual([])
+  })
+})

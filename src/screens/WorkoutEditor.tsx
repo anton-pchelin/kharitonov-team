@@ -5,7 +5,7 @@ import { CSS } from '@dnd-kit/utilities'
 import { supabase } from '../supabase'
 import { searchExercises, type Exercise } from '../search'
 import { fmtDay, mondayOf } from '../lib/dates'
-import { RESULT_TYPES, appendItems, isGroupStart, itemLabels, type ResultType, type Workout, type WorkoutItem } from '../lib/workout'
+import { COMPLEX_RESULTS, RESULT_TYPES, appendItems, complexName, complexRounds, isComplex, isGroupStart, itemLabels, type ResultType, type Workout, type WorkoutItem } from '../lib/workout'
 import { TIMER_KINDS, type TimerCfg } from '../lib/timer'
 import { PickWorkout } from './WeekTools'
 
@@ -159,6 +159,7 @@ export function WorkoutEditor({ athleteId, athleteName = '', date = '', workout,
       </DndContext>
 
       <AddItem athleteId={athleteId} exercises={exercises} onAdd={(s) => setItems((l) => [...l, blank(s, l.length)])} />
+      <button className="btn secondary" onClick={() => setItems((l) => [...l, blank({ name: complexName(5), result_type: 'time', planned_sets: 1 }, l.length)])}>+ Комплекс</button>
       {athleteId && (picking
         ? <PickWorkout athleteId={athleteId} monday={mondayOf(workout?.date ?? date)}
             onPick={(w) => { setItems((l) => appendItems(l, w.workout_items ?? [])); setPicking(false) }} onCancel={() => setPicking(false)} />
@@ -189,6 +190,9 @@ function ItemRow({ item, label, groupStart, inGroup, hasNext, onChange, onMenu }
   }
   const list = () => onChange({ plan_text: item.plan_text.split('\n').map((l) => (l.startsWith('- ') ? l : '- ' + l)).join('\n') })
 
+  const complex = isComplex(item)
+  const rounds = complexRounds(item.name) ?? 5
+
   return (
     <div ref={setNodeRef} style={{ transform: CSS.Transform.toString(transform), transition }}
       className={'item' + (inGroup ? ' superset' : '')}>
@@ -199,7 +203,8 @@ function ItemRow({ item, label, groupStart, inGroup, hasNext, onChange, onMenu }
       <div className="item-head">
         <button className="handle" {...attributes} {...listeners} aria-label="Перетащить">⋮⋮</button>
         <b className="item-label">{label}</b>
-        <input className="item-name" value={item.name} onChange={(e) => onChange({ name: e.target.value })} aria-label="Название" />
+        {complex ? <b className="item-name">Комплекс</b>
+          : <input className="item-name" value={item.name} onChange={(e) => onChange({ name: e.target.value })} aria-label="Название" />}
         <details className="menu">
           <summary aria-label="Меню задания">⋯</summary>
           <div className="menu-list">
@@ -216,13 +221,13 @@ function ItemRow({ item, label, groupStart, inGroup, hasNext, onChange, onMenu }
         <button type="button" onClick={() => wrap('*')}><i>К</i></button>
         <button type="button" onClick={list}>• список</button>
       </div>
-      <textarea ref={plan} rows={2} placeholder="Текст плана" value={item.plan_text} onChange={(e) => onChange({ plan_text: e.target.value })} />
+      <textarea ref={plan} rows={complex ? 3 : 2} placeholder={complex ? 'Что делать: 10 подтягиваний, 15 приседов, 200 м бег' : 'Текст плана'} value={item.plan_text} onChange={(e) => onChange({ plan_text: e.target.value })} />
       <div className="row timer-row">
         <select value={item.timer?.kind ?? ''} aria-label="Таймер комплекса" onChange={(e) => {
           const kind = e.target.value as TimerCfg['kind'] | ''
           // таймер сам подставит результат: круги для АМРАП, время для «на время»
           onChange(kind ? { timer: kind === 'tabata' ? { kind, work: 20, rest: 10, rounds: 8 } : { kind, minutes: item.timer?.minutes ?? 12 },
-            ...(kind === 'amrap' ? { result_type: 'rounds' as const } : kind === 'fortime' ? { result_type: 'time' as const } : {}) } : { timer: null })
+            ...(kind === 'amrap' ? { result_type: 'rounds' as const, ...(complex && { name: complexName(null) }) } : kind === 'fortime' ? { result_type: 'time' as const } : {}) } : { timer: null })
         }}>
           <option value="">без таймера</option>
           {TIMER_KINDS.map(([k, l]) => <option key={k} value={k}>Таймер: {l}</option>)}
@@ -237,7 +242,23 @@ function ItemRow({ item, label, groupStart, inGroup, hasNext, onChange, onMenu }
       </div>
       <input type="url" inputMode="url" placeholder="Видео: ссылка Rutube / VK / YouTube" value={item.video_url ?? ''}
         onChange={(e) => onChange({ video_url: e.target.value || null })} />
-      <div className="row">
+      {complex ? (
+        <div className="row">
+          <select value={item.result_type} aria-label="Результат комплекса" onChange={(e) => {
+            const t = e.target.value as ResultType
+            onChange({ result_type: t, name: complexName(t === 'rounds' ? null : rounds) })  // у АМРАП раундов нет — считают круги
+          }}>
+            {COMPLEX_RESULTS.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+          </select>
+          {item.result_type !== 'rounds' && (
+            <div className="stepper">
+              <button type="button" onClick={() => onChange({ name: complexName(Math.max(1, rounds - 1)) })} aria-label="Меньше раундов">−</button>
+              <span>{rounds} р.</span>
+              <button type="button" onClick={() => onChange({ name: complexName(rounds + 1) })} aria-label="Больше раундов">+</button>
+            </div>
+          )}
+        </div>
+      ) : <div className="row">
         <select value={item.result_type} onChange={(e) => onChange({ result_type: e.target.value as ResultType })} aria-label="Тип результата">
           {RESULT_TYPES.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
         </select>
@@ -253,7 +274,7 @@ function ItemRow({ item, label, groupStart, inGroup, hasNext, onChange, onMenu }
           <span>{item.planned_sets}</span>
           <button type="button" onClick={() => onChange({ planned_sets: Math.min(50, item.planned_sets + 1) })} aria-label="Больше подходов">+</button>
         </div>
-      </div>
+      </div>}
     </div>
   )
 }

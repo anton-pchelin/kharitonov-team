@@ -2,7 +2,7 @@
 // всё введённое сразу пишется туда и встаёт в очередь отправки. Очередь уходит, как только есть сеть.
 import { supabase } from '../supabase'
 import { addDays, today } from './dates'
-import type { Workout, WorkoutItem } from './workout'
+import { isComplex, type Workout, type WorkoutItem } from './workout'
 import type { MaxRecord } from './progress'
 import { delBlob, getBlob, videoExt } from './videoUpload'
 
@@ -207,6 +207,7 @@ const norm = (s: string) => s.toLowerCase().replaceAll('ё', 'е').trim()
 
 /** Подходы этого упражнения с прошлой тренировки (раньше даты date). */
 export function previousSets(history: PastSet[], item: Pick<WorkoutItem, 'name' | 'exercise_id'>, date: string): PastSet[] {
+  if (isComplex(item)) return []  // комплексы все разные — сравнивать не с чем
   const same = history.filter((h) => h.date < date &&
     (item.exercise_id && h.exercise_id ? h.exercise_id === item.exercise_id : norm(h.name) === norm(item.name)))
   const last = same.reduce((d, h) => (h.date > d ? h.date : d), '')

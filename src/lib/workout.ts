@@ -44,6 +44,20 @@ export type Workout = {
   workout_items?: WorkoutItem[]
 }
 
+/** Результат комплекса: на время, АМРАП (круги) или галочка. */
+export const COMPLEX_RESULTS: [ResultType, string][] = [['time', 'На время'], ['rounds', 'АМРАП'], ['check', 'Галочка']]
+
+// shortcut: комплекс — задание с названием «Комплекс · N раундов» без упражнения, отдельного столбца в базе нет;
+// если понадобится больше свойств комплекса — завести столбец миграцией
+export const isComplex = (i: { name: string; exercise_id: string | null }) => !i.exercise_id && /^Комплекс( ·|$)/.test(i.name)
+export const complexRounds = (name: string) => Number(name.match(/· (\d+)/)?.[1]) || null
+export function complexName(rounds: number | null) {
+  if (!rounds) return 'Комплекс'
+  const n10 = rounds % 10, n100 = rounds % 100
+  const word = n10 === 1 && n100 !== 11 ? 'раунд' : n10 >= 2 && n10 <= 4 && (n100 < 12 || n100 > 14) ? 'раунда' : 'раундов'
+  return `Комплекс · ${rounds} ${word}`
+}
+
 const LETTERS = 'АБВГДЕЖЗИК'
 
 /** Номера заданий: соседние с одинаковым superset — один номер с буквами (3А, 3Б). */

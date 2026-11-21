@@ -6,6 +6,7 @@ import { exerciseKey, fieldSeries, records, weeklyStats, weightSeries } from '..
 import { fmtNum, fmtTime, parseNum } from '../lib/format'
 import { addDays, fmtShort, mondayOf, today } from '../lib/dates'
 import type { PastSet } from '../lib/offline'
+import { isComplex } from '../lib/workout'
 
 type SetRow = PastSet & { workout_id: string; result_type: string }
 type ManualRecord = { id: string; name: string; weight: number | null; reps: number | null; time_sec: number | null; meters: number | null; date: string; note: string }
@@ -45,8 +46,8 @@ export function Progress({ athleteId, title }: { athleteId: string; title?: stri
         {TABS.map(([k, l]) => <button key={k} className={tab === k ? 'chip on' : 'chip'} onClick={() => setTab(k)}>{l}</button>)}
       </div>
       {sets === null && <p className="muted">Загрузка…</p>}
-      {sets && tab === 'ex' && <ByExercise sets={sets} lowerBetter={lowerBetter} />}
-      {sets && tab === 'rec' && <Records sets={sets} lowerBetter={lowerBetter} athleteId={athleteId} />}
+      {sets && tab === 'ex' && <ByExercise sets={sets.filter((s) => !isComplex(s))} lowerBetter={lowerBetter} />}
+      {sets && tab === 'rec' && <Records sets={sets.filter((s) => !isComplex(s))} lowerBetter={lowerBetter} athleteId={athleteId} />}
       {tab === 'meas' && <Measurements athleteId={athleteId} />}
       {tab === 'photo' && <Photos athleteId={athleteId} />}
       {sets && tab === 'week' && <Weekly sets={sets} athleteId={athleteId} />}

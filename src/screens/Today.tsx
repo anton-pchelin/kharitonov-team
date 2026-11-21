@@ -9,7 +9,7 @@ import { Timer } from './Timer'
 import type { WorkoutItem } from '../lib/workout'
 import { addDays, dayShort, fmtDay, mondayOf, parseIso, today, weekDays } from '../lib/dates'
 import { fmtNum } from '../lib/format'
-import { RESULT_TYPES, type ResultType, type Workout } from '../lib/workout'
+import { COMPLEX_RESULTS, RESULT_TYPES, complexName, type ResultType, type Workout } from '../lib/workout'
 
 const stores = new Map<string, OfflineStore>()
 export const storeFor = (userId: string) => {
@@ -42,9 +42,9 @@ export function Today({ profile, date: routeDate }: { profile: Profile; date?: s
   const editable = date >= addDays(today(), -7)  // правка своих результатов — 7 дней назад
   const names = { [profile.id]: profile.name, ...Object.fromEntries(data.comments.filter((c) => c.author_id !== profile.id).map((c) => [c.author_id, coachName])) }
 
-  const addOwnWorkout = (title: string) => store.do({
+  const addOwnWorkout = (title: string, prescription: string) => store.do({
     t: 'workout',
-    row: { id: crypto.randomUUID(), athlete_id: profile.id, date, title, prescription: '', published: true, self: true, completed_at: null, workout_items: [] },
+    row: { id: crypto.randomUUID(), athlete_id: profile.id, date, title, prescription, published: true, self: true, completed_at: null, workout_items: [] },
   })
 
   return (
@@ -125,13 +125,51 @@ function Finish({ workout, results, onDone }: { workout: Workout; results: Param
 function AddOwnItem({ workout, exercises, onAdd }: {
   workout: Workout; exercises: Exercise[]; onAdd: (row: NonNullable<Workout['workout_items']>[number] & { workout_id: string }) => void
 }) {
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = useState<'ex' | 'complex' | null>(null)
   const [q, setQ] = useState('')
   const [picked, setPicked] = useState<{ name: string; exercise_id: string | null } | null>(null)
   const [type, setType] = useState<ResultType>('weight_reps')
   const [sets, setSets] = useState(3)
+  const [plan, setPlan] = useState('')
+  const [rounds, setRounds] = useState(5)
 
-  if (!open) return <button className="btn secondary" onClick={() => setOpen(true)}>+ моё упражнение</button>
+  if (!open) return (
+    <>
+      <button className="btn secondary" onClick={() => setOpen('ex')}>+ моё упражнение</button>
+      <button className="btn secondary" onClick={() => { setOpen('complex'); setType('time') }}>+ комплекс</button>
+    </>
+  )
+  const close = () => { setOpen(null); setQ(''); setPicked(null); setPlan(''); setType('weight_reps'); setSets(3) }
+
+  if (open === 'complex') return (
+    <div className="card own-form">
+      <b>Комплекс</b>
+      <textarea autoFocus rows={3} placeholder="Что делать: 10 подтягиваний, 15 приседов, 200 м бег" value={plan} onChange={(e) => setPlan(e.target.value)} />
+      <div className="segmented">
+        {COMPLEX_RESULTS.map(([k, l]) => <button key={k} type="button" className={type === k ? 'active' : ''} onClick={() => setType(k)}>{l}</button>)}
+      </div>
+      {type !== 'rounds' && (
+        <div className="row-between">
+          <span>Раундов</span>
+          <div className="stepper">
+            <button type="button" onClick={() => setRounds(Math.max(1, rounds - 1))} aria-label="Меньше раундов">−</button>
+            <span>{rounds}</span>
+            <button type="button" onClick={() => setRounds(rounds + 1)} aria-label="Больше раундов">+</button>
+          </div>
+        </div>
+      )}
+      <button className="btn" onClick={() => {
+        if (!plan.trim()) return alert('Напишите, что делать в комплексе')
+        onAdd({
+          id: crypto.randomUUID(), workout_id: workout.id, position: 1000 + (workout.workout_items?.length ?? 0),
+          exercise_id: null, name: complexName(type === 'rounds' ? null : rounds), plan_text: plan.trim(), video_url: null,
+          result_type: type, planned_sets: 1, superset: null, block_note: '', self: true,
+        })
+        close()
+      }}>Добавить</button>
+      <button className="btn secondary" onClick={close}>Отмена</button>
+    </div>
+  )
 
   const add = async () => {
     let it = picked ?? { name: q.trim(), exercise_id: null }
@@ -143,10 +181,10 @@ function AddOwnItem({ workout, exercises, onAdd }: {
     }
     onAdd({
       id: crypto.randomUUID(), workout_id: workout.id, position: 1000 + (workout.workout_items?.length ?? 0),
-      exercise_id: it.exercise_id, name: it.name, plan_text: '', video_url: null, result_type: type,
+      exercise_id: it.exercise_id, name: it.name, plan_text: plan.trim(), video_url: null, result_type: type,
       planned_sets: type === 'check' ? 1 : sets, superset: null, block_note: '', self: true,
     })
-    setOpen(false); setQ(''); setPicked(null)
+    close()
   }
 
   const found = q && !picked ? searchExercises(exercises, q).slice(0, 6) : []
@@ -160,6 +198,7 @@ function AddOwnItem({ workout, exercises, onAdd }: {
           {found.map((e) => <button key={e.id} onClick={() => { setPicked({ name: e.name, exercise_id: e.id }); if (e.default_result_type) setType(e.default_result_type); if (e.default_result_type === 'cardio') setSets(1) }}>{e.name}</button>)}
         </div>
       )}
+      <textarea rows={2} placeholder="Описание: 3×10, резина синяя" value={plan} onChange={(e) => setPlan(e.target.value)} />
       <div className="row">
         <select value={type} onChange={(e) => setType(e.target.value as ResultType)} aria-label="Тип результата">
           {RESULT_TYPES.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
@@ -173,19 +212,21 @@ function AddOwnItem({ workout, exercises, onAdd }: {
         )}
       </div>
       <button className="btn" onClick={add}>Добавить</button>
-      <button className="btn secondary" onClick={() => setOpen(false)}>Отмена</button>
+      <button className="btn secondary" onClick={close}>Отмена</button>
     </div>
   )
 }
 
-function AddOwnWorkout({ onAdd }: { onAdd: (title: string) => void }) {
+function AddOwnWorkout({ onAdd }: { onAdd: (title: string, prescription: string) => void }) {
   const [open, setOpen] = useState(false)
   const [title, setTitle] = useState('')
+  const [text, setText] = useState('')
   if (!open) return <button className="btn secondary" onClick={() => setOpen(true)}>+ своя тренировка</button>
   return (
-    <form className="card own-form" onSubmit={(e) => { e.preventDefault(); if (title.trim()) { onAdd(title.trim()); setOpen(false); setTitle('') } }}>
+    <form className="card own-form" onSubmit={(e) => { e.preventDefault(); if (title.trim()) { onAdd(title.trim(), text.trim()); setOpen(false); setTitle(''); setText('') } }}>
       <b>Своя тренировка</b>
       <input autoFocus placeholder="Например: Бег 5 км, 28:30" value={title} onChange={(e) => setTitle(e.target.value)} />
+      <textarea rows={2} placeholder="Описание: разминка, темп, самочувствие" value={text} onChange={(e) => setText(e.target.value)} />
       <button className="btn">Добавить</button>
       <button type="button" className="btn secondary" onClick={() => setOpen(false)}>Отмена</button>
     </form>
