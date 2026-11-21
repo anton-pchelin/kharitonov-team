@@ -43,6 +43,7 @@
 - `athlete_groups`, `group_members` — группы атлетов (тренировка группе = копия каждому).
 - `exercises` — база упражнений (`source`: base/coach/athlete; `lower_is_better` — для времени). `merge_exercises` — объединить два названия.
 - `workouts` (тренировка: атлет, дата, опубликована, `self` — своя атлета, `completed_at`, `reviewed_at`) и `workout_items` (задания: `superset`, `block_note`, `pct`, `timer`, `self` — добавлено атлетом). Тренер сохраняет через `save_workout` (одна транзакция; убранное задание с результатами становится «сам»), копирует — `copy_workout`, `copy_week`, `assign_program` → `place_workout`.
+- Комплекс («+ комплекс» у атлета, «+ Комплекс» в редакторе тренера) — обычное задание без упражнения с названием «Комплекс · N раундов» (у АМРАП — просто «Комплекс»), что делать — в `plan_text`. Отдельного столбца нет: узнаётся `isComplex` (`src/lib/workout.ts`), в «Прогрессе» и «прошлый раз» не участвует.
 - `set_results` (подходы, ключ — задание + номер), `comments` (с видео `video_path`, через 30 дней — `video_deleted`). Атлет пишет результаты за 7 дней назад и вперёд (`can_write_results`), завершает — `complete_workout`.
 - `item_templates`, `workout_templates`, `programs` + `program_workouts` — шаблоны и программы (снимки заданий: правка шаблона назначенное не меняет).
 - `records`, `measurements`, `progress_photos` — прогресс (атлет и его тренер). Хранилища: `progress` (фото), `videos` (видео) — папка = id атлета.
