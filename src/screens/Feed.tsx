@@ -3,7 +3,9 @@ import { supabase } from '../supabase'
 import { WorkoutView, progress } from './WorkoutView'
 import { addDays, fmtDay, today } from '../lib/dates'
 import type { Workout } from '../lib/workout'
-import type { Comment, SetResult } from '../lib/offline'
+import { loadCardioHistory, type Comment, type PastSet, type SetResult } from '../lib/offline'
+import { cardioSummary } from '../lib/cardio'
+import { exerciseKey } from '../lib/progress'
 
 type W = Workout & { reviewed_at: string | null; profiles: { name: string } | null }
 type Event = { w: W; kind: 'done' | 'self' | 'missed'; comments: Comment[]; videos: number; needsReply: boolean; record: boolean }
@@ -14,6 +16,7 @@ const initials = (name: string) => name.split(/\s+/).map((s) => s[0]).join('').s
 export function Feed({ me }: { me: { id: string; name: string } }) {
   const [events, setEvents] = useState<Event[] | null>(null)
   const [results, setResults] = useState<SetResult[]>([])
+  const [history, setHistory] = useState<(PastSet & { athlete_id: string })[]>([])
   const [onlyReply, setOnlyReply] = useState(false)
   const [open, setOpen] = useState<string | null>(null)
 
@@ -23,10 +26,12 @@ export function Feed({ me }: { me: { id: string; name: string } }) {
     const ws = (data ?? []) as W[]
     const ids = ws.map((w) => w.id)
     const itemIds = ws.flatMap((w) => (w.workout_items ?? []).map((i) => i.id))
-    const [c, r] = await Promise.all([
+    const [c, r, h] = await Promise.all([
       ids.length ? supabase.from('comments').select('*').in('workout_id', ids).order('created_at') : { data: [] },
       itemIds.length ? supabase.from('set_results').select('*').in('item_id', itemIds) : { data: [] },
+      loadCardioHistory([...new Set(ws.map((w) => w.athlete_id))]),
     ])
+    setHistory(h)
     const comments = (c.data ?? []) as Comment[]
     const res = (r.data ?? []) as SetResult[]
     const records = await Promise.all(ws.map((w) => (w.completed_at ? supabase.rpc('has_new_record', { p_workout: w.id }) : { data: false })))
@@ -44,6 +49,13 @@ export function Feed({ me }: { me: { id: string; name: string } }) {
     }))
   }, [])
   useEffect(() => { load() }, [load])
+
+  // кардио-подходы атлета: «Гребля 30:00 · 7000 м · пульс 140 · 1,67 м/уд ▲ 4%»
+  const cardio = (w: W) => (w.workout_items ?? []).filter((i) => i.result_type === 'cardio').flatMap((i) => {
+    const past = history.filter((h) => h.athlete_id === w.athlete_id && h.date < w.date && exerciseKey(h) === exerciseKey(i))
+    return results.filter((r) => r.item_id === i.id).sort((a, b) => a.set_no - b.set_no)
+      .map((r) => cardioSummary(i.name, r, past)).filter((l): l is string => !!l)
+  })
 
   if (!events) return <p className="muted">Загрузка…</p>
   const waiting = events.filter((e) => e.needsReply)
@@ -74,11 +86,12 @@ export function Feed({ me }: { me: { id: string; name: string } }) {
                 {e.comments.length > 0 && <span className="muted"> · 💬 {e.comments.length}</span>}
                 {e.videos > 0 && <span className="muted"> · 🎬 {e.videos}</span>}
                 {e.needsReply && <span className="tag">ждёт ответа</span>}
+                {cardio(e.w).map((l, k) => <span key={k} className="feed-cardio">{l}</span>)}
               </span>
             </button>
             {open === e.w.id && (
               <>
-                <WorkoutView workout={e.w} results={results} comments={e.comments} history={[]}
+                <WorkoutView workout={e.w} results={results} comments={e.comments} history={history.filter((h) => h.athlete_id === e.w.athlete_id)}
                   me={me.id} names={{ [me.id]: me.name, [e.w.athlete_id]: name }} editable={false}
                   onComment={async (item_id, text) => {
                     const { error } = await supabase.from('comments').insert({ workout_id: e.w.id, item_id, text })

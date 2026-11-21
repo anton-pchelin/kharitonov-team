@@ -15,6 +15,7 @@ export type SetResult = {
   meters?: number | null
   calories?: number | null
   rounds?: number | null
+  hr?: number | null  // средний пульс (кардио)
   done: boolean
 }
 export type Comment = {
@@ -176,7 +177,7 @@ export class OfflineStore {
     const [w, r, rec] = await Promise.all([
       supabase.from('workouts').select('*, workout_items(*)').eq('athlete_id', this.userId).gte('date', from).lte('date', to),
       supabase.from('set_results')
-        .select('item_id, set_no, weight, reps, time_sec, meters, calories, rounds, done, workout_items!inner(name, exercise_id, workouts!inner(date))')
+        .select('item_id, set_no, weight, reps, time_sec, meters, calories, rounds, hr, done, workout_items!inner(name, exercise_id, workouts!inner(date))')
         .eq('athlete_id', this.userId).gte('workout_items.workouts.date', addDays(today(), -365)),
       supabase.from('records').select('exercise_id, name, weight, reps').eq('athlete_id', this.userId),
     ])
@@ -210,4 +211,14 @@ export function previousSets(history: PastSet[], item: Pick<WorkoutItem, 'name' 
     (item.exercise_id && h.exercise_id ? h.exercise_id === item.exercise_id : norm(h.name) === norm(item.name)))
   const last = same.reduce((d, h) => (h.date > d ? h.date : d), '')
   return same.filter((h) => h.date === last).sort((a, b) => a.set_no - b.set_no)
+}
+
+/** Прошлые кардио-подходы атлетов (с пульсом) — тренеру для сравнения «▲ 4% к среднему». */
+export async function loadCardioHistory(athleteIds: string[]): Promise<(PastSet & { athlete_id: string })[]> {
+  if (!athleteIds.length) return []
+  const { data } = await supabase.from('set_results')
+    .select('item_id, set_no, time_sec, meters, hr, done, athlete_id, workout_items!inner(name, exercise_id, result_type, workouts!inner(date))')
+    .in('athlete_id', athleteIds).not('hr', 'is', null).eq('workout_items.result_type', 'cardio')
+  type Row = SetResult & { athlete_id: string; workout_items: { name: string; exercise_id: string | null; workouts: { date: string } } }
+  return ((data ?? []) as unknown as Row[]).map(({ workout_items: i, ...s }) => ({ ...s, name: i.name, exercise_id: i.exercise_id, date: i.workouts.date }))
 }

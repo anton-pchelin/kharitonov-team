@@ -8,7 +8,7 @@ import { DndContext, PointerSensor, useDraggable, useDroppable, useSensor, useSe
 import type { WorkoutItem } from '../lib/workout'
 import { addDays, dayShort, fmtShort, mondayOf, today, weekDays } from '../lib/dates'
 import type { Workout } from '../lib/workout'
-import type { Comment, SetResult } from '../lib/offline'
+import { loadCardioHistory, type Comment, type PastSet, type SetResult } from '../lib/offline'
 import { WorkoutView, progress } from './WorkoutView'
 
 type Athlete = { id: string; name: string }
@@ -32,6 +32,7 @@ export function Plan({ athleteId, week, open, me }: { athleteId?: string; week?:
   const [templates, setTemplates] = useState<Template[]>([])
   const [viewing, setViewing] = useState<string | null>(open ?? null)
   const [results, setResults] = useState<SetResult[]>([])
+  const [history, setHistory] = useState<PastSet[]>([])  // прошлые кардио — для «▲ 4% к среднему»
   const [comments, setComments] = useState<Comment[]>([])
   const monday = mondayOf(week ?? today())
 
@@ -63,10 +64,12 @@ export function Plan({ athleteId, week, open, me }: { athleteId?: string; week?:
     if (error) alert('Не загрузилось: ' + error.message)
     const ws = (data ?? []) as Workout[]
     const itemIds = ws.flatMap((w) => (w.workout_items ?? []).map((i) => i.id))
-    const [r, c] = await Promise.all([
+    const [r, c, h] = await Promise.all([
       itemIds.length ? supabase.from('set_results').select('*').in('item_id', itemIds) : { data: [] },
       ws.length ? supabase.from('comments').select('*').in('workout_id', ws.map((w) => w.id)).order('created_at') : { data: [] },
+      loadCardioHistory([athlete.id]),
     ])
+    setHistory(h)
     setResults((r.data ?? []) as SetResult[])
     setComments((c.data ?? []) as Comment[])
     setWorkouts(ws)
@@ -149,7 +152,7 @@ export function Plan({ athleteId, week, open, me }: { athleteId?: string; week?:
       {viewing && workouts.some((w) => w.id === viewing) && (
         <section className="editor card" key={viewing} ref={toTop}>
           <div className="row-between"><b>Результаты — {athlete.name}</b><button className="back" onClick={() => setViewing(null)}>✕</button></div>
-          <WorkoutView workout={workouts.find((w) => w.id === viewing)!} results={results} comments={comments} history={[]}
+          <WorkoutView workout={workouts.find((w) => w.id === viewing)!} results={results} comments={comments} history={history}
             me={me.id} names={{ [me.id]: me.name, [athlete.id]: athlete.name }} editable={false}
             onComment={async (item_id, text) => {
               const { error } = await supabase.from('comments').insert({ workout_id: viewing, item_id, text })

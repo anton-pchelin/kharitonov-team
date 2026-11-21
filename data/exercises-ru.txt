@@ -611,7 +611,7 @@ Rope Crunch | Скручивания с канатом на блоке
 Rope Jumping | Прыжки на скакалке
 Rope Straight-Arm Pulldown | Тяга каната прямыми руками на верхнем блоке
 Round The World Shoulder Stretch | Растяжка плеч «вокруг света»
-Rowing, Stationary | Гребной тренажёр
+Rowing, Stationary | Гребля (Concept2 RowErg)
 Runner's Stretch | Растяжка бегуна
 Running, Treadmill | Бег на дорожке
 Russian Twist | Русские скручивания

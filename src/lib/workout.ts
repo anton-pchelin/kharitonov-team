@@ -1,6 +1,6 @@
 import type { TimerCfg } from './timer'
 
-export type ResultType = 'weight_reps' | 'reps' | 'weight' | 'time' | 'meters' | 'calories' | 'rounds' | 'check'
+export type ResultType = 'weight_reps' | 'reps' | 'weight' | 'time' | 'meters' | 'calories' | 'rounds' | 'check' | 'cardio'
 
 export const RESULT_TYPES: [ResultType, string][] = [
   ['weight_reps', 'кг + повторения'],
@@ -11,6 +11,7 @@ export const RESULT_TYPES: [ResultType, string][] = [
   ['calories', 'калории'],
   ['rounds', 'круги'],
   ['check', 'галочка'],
+  ['cardio', 'кардио (время, метры, пульс)'],
 ]
 export const resultLabel = (t: ResultType) => RESULT_TYPES.find(([k]) => k === t)?.[1] ?? t
 

@@ -237,3 +237,43 @@ describe('сигналы таймера', async () => {
     expect(timerCues({ kind: 'amrap', minutes: 12 }, { half: false, ten: true, count: false })).toEqual([[0, 'start'], [710, 'ten'], [720, 'finish']])
   })
 })
+
+describe('кардио', async () => {
+  const { cardioLines, cardioSummary, compare, efficiency, pace500 } = await import('./lib/cardio')
+  const row = (date: string, time_sec: number, meters: number, hr: number | null) => ({ date, time_sec, meters, hr })
+  const d1 = row('2026-11-14', 1800, 7000, 140)
+  const d2 = row('2026-11-21', 3600, 13500, 140)
+
+  it('пример из задания: 30:00 · 7000 м · 140 и 60:00 · 13 500 м · 140', () => {
+    expect(cardioLines(d1, [])).toEqual(['темп 2:09/500 · 1,67 м/удар', 'не с чем сравнить'])
+    expect(cardioLines(d2, [d1])).toEqual(['темп 2:13/500 · 1,61 м/удар', '▼ 4% к среднему (1 трен.)'])
+  })
+  it('настоящие тренировки: гребля 30:05 · 6643 · 145, байк 30:08 · 10 710 · 143', () => {
+    expect(cardioLines(row('2026-11-19', 1805, 6643, 145), [])).toEqual(['темп 2:16/500 · 1,52 м/удар', 'не с чем сравнить'])
+    expect(cardioLines(row('2026-11-20', 1808, 10710, 143), [])).toEqual(['темп 1:24/500 · 2,49 м/удар', 'не с чем сравнить'])
+  })
+  it('без пульса — темп есть, эффективности нет, в среднее не попадает', () => {
+    const noHr = row('2026-11-20', 1800, 9000, null)
+    expect(cardioLines(noHr, [])).toEqual(['темп 1:40/500 · без пульса — эффективность не считаем'])
+    expect(compare(d2, [noHr, d1])?.n).toBe(1)
+  })
+  it('в среднее — только пульс ±10, не больше 4 последних', () => {
+    expect(compare(d2, [row('2026-11-15', 1800, 9000, 160)])).toBeNull()
+    expect(compare(d2, [row('2026-11-15', 1800, 9000, 150), d1])?.n).toBe(2)
+    const many = ['01', '02', '03', '04', '05'].map((d) => row('2026-11-' + d, 1800, 7000, 140))
+    expect(compare(d2, many)?.n).toBe(4)
+  })
+  it('разница меньше 1% — «≈ как обычно»', () => {
+    expect(cardioLines(row('2026-11-21', 1800, 7030, 140), [d1])[1]).toBe('≈ как обычно (1 трен.)')
+  })
+  it('строка в ленте тренера', () => {
+    expect(cardioSummary('Гребля', d1, [])).toBe('Гребля 30:00 · 7000 м · пульс 140 · 1,67 м/уд')
+    expect(cardioSummary('Гребля', d2, [d1])).toBe('Гребля 1:00:00 · 13500 м · пульс 140 · 1,61 м/уд ▼ 4%')
+    expect(cardioSummary('Гребля', row('2026-11-21', 1800, 7000, null), [])).toBe('Гребля 30:00 · 7000 м')
+  })
+  it('ерунда в числах — эффективность не считаем', () => {
+    expect(efficiency(row('2026-11-21', 1800, 7000, 30))).toBeNull()
+    expect(efficiency(row('2026-11-21', 0, 7000, 140))).toBeNull()
+    expect(pace500(row('2026-11-21', 1800, 0, 140))).toBeNull()
+  })
+})

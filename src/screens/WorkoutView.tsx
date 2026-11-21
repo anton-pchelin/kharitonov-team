@@ -7,6 +7,7 @@ import { itemLabels, resultLabel, type ResultType, type Workout, type WorkoutIte
 import { previousSets, type Comment, type PastSet, type SetResult } from '../lib/offline'
 import { exerciseKey, isRecordSet, matchSet, maxFor, pctWeight, type MaxRecord } from '../lib/progress'
 import { platesFor } from '../lib/plates'
+import { cardioLines, hrOk } from '../lib/cardio'
 
 export type ViewProps = {
   workout: Workout
@@ -27,14 +28,14 @@ export type ViewProps = {
   onDelete?: (item: WorkoutItem | null) => void  // атлет удаляет своё: задание «сам» или (null) свою тренировку
 }
 
-type Field = 'weight' | 'reps' | 'time_sec' | 'meters' | 'calories' | 'rounds'
+type Field = 'weight' | 'reps' | 'time_sec' | 'meters' | 'calories' | 'rounds' | 'hr'
 const FIELDS: Record<ResultType, Field[]> = {
   weight_reps: ['weight', 'reps'], reps: ['reps'], weight: ['weight'], time: ['time_sec'],
-  meters: ['meters'], calories: ['calories'], rounds: ['rounds'], check: [],
+  meters: ['meters'], calories: ['calories'], rounds: ['rounds'], check: [], cardio: ['time_sec', 'meters', 'hr'],
 }
-const UNIT: Record<Field, string> = { weight: 'кг', reps: 'повт', time_sec: 'мм:сс', meters: 'м', calories: 'ккал', rounds: 'кругов' }
+const UNIT: Record<Field, string> = { weight: 'кг', reps: 'повт', time_sec: 'мм:сс', meters: 'м', calories: 'ккал', rounds: 'кругов', hr: 'пульс' }
 const show = (f: Field, v: number | null | undefined) => (f === 'time_sec' ? fmtTime(v) : fmtNum(v))
-const parse = (f: Field, s: string) => (f === 'time_sec' ? parseTime(s) : f === 'reps' || f === 'rounds' ? (parseNum(s) == null ? null : Math.round(parseNum(s)!)) : parseNum(s))
+const parse = (f: Field, s: string) => (f === 'time_sec' ? parseTime(s) : f === 'reps' || f === 'rounds' || f === 'hr' ? (parseNum(s) == null ? null : Math.round(parseNum(s)!)) : parseNum(s))
 
 /** Сколько заданий сделано: у задания есть хотя бы один отмеченный или заполненный подход. */
 export function progress(items: WorkoutItem[], results: SetResult[]) {
@@ -112,9 +113,13 @@ function ItemView(p: ViewProps & { item: WorkoutItem; label: string; note: strin
           record={isRecordSet(mine.find((r) => r.set_no === n)?.weight, mine.find((r) => r.set_no === n)?.reps, earlier)}
           gym={p.gym} pctKg={item.pct != null && p.maxes ? (() => { const m = maxFor(item, p.history, p.maxes); return m ? pctWeight(item.pct, m) : null })() : null}
           editable={p.editable} onPut={(patch) => put(n, patch)} />
-      ))}
+      )).flatMap((row, k) => {
+        const v = mine.find((r) => r.set_no === k + 1)
+        const lines = item.result_type === 'cardio' && v ? cardioLines(v, earlier) : []
+        return [row, ...lines.map((l, j) => <small key={`c${k}-${j}`} className="cardio-line">{l}</small>)]
+      })}
       {item.result_type !== 'check' && prev.length > 0 && (
-        <small className="muted">прошлый раз: {prev.map((s) => FIELDS[item.result_type].map((f) => show(f, s[f])).filter(Boolean).join('×')).join(', ')}</small>
+        <small className="muted">прошлый раз: {prev.map((s) => FIELDS[item.result_type].map((f) => show(f, s[f])).filter(Boolean).join(item.result_type === 'cardio' ? ' · ' : '×')).join(', ')}</small>
       )}
       {p.editable && item.result_type !== 'check' && (
         <button className="link-btn" onClick={() => setExtraRows(extraRows + 1)}>+ подход</button>
@@ -147,6 +152,8 @@ function SetRow({ n, type, value, hint, record, editable, onPut, gym, pctKg }: {
   const [draft, setDraft] = useState<Partial<Record<Field, string>>>({})
   const [calc, setCalc] = useState(false)
   const text = (f: Field) => draft[f] ?? show(f, value?.[f])
+  // ерунда в кардио (0 метров, пульс 300) — подсветить; сохранять не мешаем
+  const bad = (f: Field) => type === 'cardio' && value?.[f] != null && (f === 'hr' ? !hrOk(value.hr) : Number(value[f]) <= 0)
   // ввёл повторы — в поле веса серым вес той же трудности, что в прошлый раз (и наоборот)
   const typed = (f: 'weight' | 'reps') => (draft[f] !== undefined ? parseNum(draft[f]!) : value?.[f]) ?? null
   const match: Partial<Record<Field, number>> = type === 'weight_reps' && hint ? matchSet(hint, { weight: typed('weight'), reps: typed('reps') }) : {}
@@ -161,8 +168,8 @@ function SetRow({ n, type, value, hint, record, editable, onPut, gym, pctKg }: {
       <span className="set-no">{record ? '🏆' : n}</span>
       {fields.map((f, i) => (
         <span key={f} className="set-field">
-          {i > 0 && <span className="muted">×</span>}
-          <input inputMode={f === 'time_sec' ? 'numeric' : 'decimal'} disabled={!editable} aria-label={`${UNIT[f]}, подход ${n}`}
+          {i > 0 && type !== 'cardio' && <span className="muted">×</span>}
+          <input inputMode={f === 'time_sec' || f === 'hr' ? 'numeric' : 'decimal'} className={bad(f) ? 'bad' : undefined} disabled={!editable} aria-label={`${UNIT[f]}, подход ${n}`}
             placeholder={(match[f] != null ? '≈ ' + show(f, match[f]) : show(f, hint?.[f])) || (f === 'weight' ? '' : UNIT[f])} value={text(f)}
             onChange={(e) => setDraft((d) => ({ ...d, [f]: e.target.value }))}
             onBlur={() => commit(f)} onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()} />

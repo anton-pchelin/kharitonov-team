@@ -18,7 +18,7 @@ const POSES = { front: 'спереди', side: 'сбоку', back: 'сзади' 
 
 async function loadSets(athleteId: string): Promise<SetRow[]> {
   const { data } = await supabase.from('set_results')
-    .select('item_id, set_no, weight, reps, time_sec, meters, calories, rounds, done, workout_items!inner(name, exercise_id, result_type, workout_id, workouts!inner(date))')
+    .select('item_id, set_no, weight, reps, time_sec, meters, calories, rounds, hr, done, workout_items!inner(name, exercise_id, result_type, workout_id, workouts!inner(date))')
     .eq('athlete_id', athleteId)
   type Row = PastSet & { workout_items: { name: string; exercise_id: string | null; result_type: string; workout_id: string; workouts: { date: string } } }
   return ((data ?? []) as unknown as Row[]).map(({ workout_items: i, ...s }) => ({
@@ -72,6 +72,7 @@ function ByExercise({ sets, lowerBetter }: { sets: SetRow[]; lowerBetter: Record
   if (!list.length) return <p className="muted">Пока нет результатов — они появятся после первой тренировки.</p>
   const withWeight = g?.sets.some((s) => s.weight)
   const lower = !!lowerBetter[key]
+  const cardio = !!g?.sets.some((s) => s.result_type === 'cardio')  // кардио на графике — метры
   return (
     <>
       <select value={key} onChange={(e) => setKey(e.target.value)} aria-label="Упражнение">
@@ -81,10 +82,11 @@ function ByExercise({ sets, lowerBetter }: { sets: SetRow[]; lowerBetter: Record
         const { best, e1rm } = weightSeries(g.sets)
         return <LineChart unit="кг" format={fmtNum} series={[{ label: 'Лучший вес', points: best }, { label: 'Расчётный 1ПМ', points: e1rm, muted: true }]} />
       })()}
-      {g && !withWeight && g.sets.some((s) => s.time_sec != null) && (
+      {g && !withWeight && !cardio && g.sets.some((s) => s.time_sec != null) && (
         <LineChart unit="" format={fmtTime} series={[{ label: lower ? 'Лучшее время (меньше — лучше)' : 'Лучшее время', points: fieldSeries(g.sets, 'time_sec', lower) }]} />
       )}
-      {g && !withWeight && !g.sets.some((s) => s.time_sec != null) && (
+      {g && !withWeight && cardio && <LineChart unit="м" format={fmtNum} series={[{ label: 'Метры', points: fieldSeries(g.sets, 'meters') }]} />}
+      {g && !withWeight && !cardio && !g.sets.some((s) => s.time_sec != null) && (
         <LineChart unit="повт" series={[{ label: 'Повторения', points: fieldSeries(g.sets, g.sets.some((s) => s.reps != null) ? 'reps' : g.sets.some((s) => s.meters != null) ? 'meters' : 'rounds') }]} />
       )}
       <table className="history">
@@ -95,7 +97,7 @@ function ByExercise({ sets, lowerBetter }: { sets: SetRow[]; lowerBetter: Record
               <td>{fmtShort(d)}</td>
               <td>{g!.sets.filter((s) => s.date === d).sort((a, b) => a.set_no - b.set_no).map((s) =>
                 [s.weight != null && `${fmtNum(s.weight)} кг`, s.reps != null && `${s.reps}`, s.time_sec != null && fmtTime(s.time_sec),
-                  s.meters != null && `${fmtNum(s.meters)} м`, s.rounds != null && `${s.rounds} кр.`].filter(Boolean).join(' × ') || '✓').join(', ')}</td>
+                  s.meters != null && `${fmtNum(s.meters)} м`, s.rounds != null && `${s.rounds} кр.`, s.hr != null && `пульс ${s.hr}`].filter(Boolean).join(' × ') || '✓').join(', ')}</td>
             </tr>
           ))}
         </tbody>
@@ -128,7 +130,8 @@ function Records({ sets, lowerBetter, athleteId }: { sets: SetRow[]; lowerBetter
 
   return (
     <>
-      {groups(sets).map(([k, g]) => {
+      {/* кардио в рекорды не идёт: самая длинная тренировка — не рекорд */}
+      {groups(sets.filter((s) => s.result_type !== 'cardio')).map(([k, g]) => {
         const r = records(g.sets, lowerBetter[k])
         const parts = [
           ...r.byReps.map((b) => `${b.reps} повт: ${fmtNum(b.weight)} кг`),

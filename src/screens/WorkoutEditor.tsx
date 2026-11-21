@@ -308,7 +308,7 @@ function AddItem({ athleteId, exercises, onAdd }: { athleteId?: string; exercise
           {found.templates.map((t) => <button key={t.id} onClick={() => pick(t)}><b>{t.name}</b> <span className="muted">{t.plan_text.split('\n')[0]}</span></button>)}
           {found.base.length > 0 && <small className="muted">База упражнений</small>}
           {found.base.map((e) => (
-            <button key={e.id} onClick={() => pick({ name: e.name, exercise_id: e.id, plan_text: '', video_url: e.video_url, result_type: 'weight_reps', planned_sets: 3 })}>
+            <button key={e.id} onClick={() => pick({ name: e.name, exercise_id: e.id, plan_text: '', video_url: e.video_url, result_type: e.default_result_type ?? 'weight_reps', planned_sets: e.default_result_type === 'cardio' ? 1 : 3 })}>
               {e.name}
             </button>
           ))}

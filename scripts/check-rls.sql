@@ -22,6 +22,8 @@ begin
   select count(*) into n from public.exercises where source = 'base';
   assert n >= 870, 'в базе мало упражнений: ' || n;
   select id into base_id from public.exercises where source = 'base' limit 1;
+  select count(*) into n from public.exercises where default_result_type = 'cardio' and name like '%(Concept2 %';
+  assert n = 3, 'нет трёх кардио-тренажёров Concept2: ' || n;
 
   insert into public.coach_emails values (mail1), (mail2);
   insert into auth.users (id, email) values
@@ -223,9 +225,14 @@ begin
   select id into it from public.workout_items where workout_id = w_pub and not self limit 1;
   select id into it_draft from public.workout_items where workout_id = w_draft limit 1;
   w_old := public.save_workout(json_build_object('athlete_id', a1, 'date', current_date - 10, 'title', 'Старая', 'published', true)::jsonb,
-    json_build_array(json_build_object('id', gen_random_uuid(), 'position', 0, 'name', 'Присед', 'result_type', 'weight_reps', 'planned_sets', 1))::jsonb);
+    json_build_array(json_build_object('id', gen_random_uuid(), 'position', 0, 'name', 'Гребля', 'result_type', 'cardio', 'planned_sets', 1))::jsonb);
   perform set_config('request.jwt.claims', json_build_object('sub', a1, 'role', 'authenticated')::text, true);
   insert into public.set_results (item_id, set_no, weight, reps, done) values (it, 1, 40, 10, true);
+  -- кардио (время, метры, пульс): атлет пишет пульс в свой подход
+  insert into public.set_results (item_id, set_no, time_sec, meters, hr, done) values (it, 3, 1800, 7000, 140, true);
+  update public.set_results set hr = 141 where item_id = it and set_no = 3;
+  get diagnostics n = row_count;
+  assert n = 1, 'атлет не смог поправить свой пульс';
   insert into public.comments (workout_id, item_id, text) values (w_pub, it, 'резина синяя');
   begin
     insert into public.set_results (item_id, set_no, weight) values (it_draft, 1, 1);
@@ -245,24 +252,37 @@ begin
     assert false, 'чужой атлет записал результат';
   exception when insufficient_privilege then null;
   end;
+  begin
+    insert into public.set_results (item_id, set_no, time_sec, meters, hr) values (it, 4, 1800, 7000, 150);
+    assert false, 'чужой атлет записал пульс';
+  exception when insufficient_privilege then null;
+  end;
+  update public.set_results set hr = 99 where item_id = it;
+  get diagnostics n = row_count;
+  assert n = 0, 'чужой атлет изменил пульс';
   select count(*) into n from public.set_results where item_id = it;
   assert n = 0, 'атлет видит чужие результаты';
   select count(*) into n from public.comments where workout_id = w_pub;
   assert n = 0, 'атлет видит чужие комментарии';
   perform public.complete_workout(w_pub);
   perform set_config('request.jwt.claims', json_build_object('sub', coach1, 'role', 'authenticated')::text, true);
-  select count(*) into n from public.set_results where item_id = it;
+  select count(*) into n from public.set_results where item_id = it and set_no = 1;
   assert n = 1, 'тренер не видит результаты атлета';
   update public.set_results set weight = 999 where item_id = it;
   get diagnostics n = row_count;
   assert n = 0, 'тренер изменил результат атлета';
+  update public.set_results set hr = 99 where item_id = it;
+  get diagnostics n = row_count;
+  assert n = 0, 'тренер изменил пульс атлета';
+  select hr into n from public.set_results where item_id = it and set_no = 3;
+  assert n = 141, 'тренер не видит пульс атлета';
   select count(*) into n from public.workouts where id = w_pub and completed_at is not null;
   assert n = 1, 'атлет не смог завершить тренировку';
   insert into public.comments (workout_id, item_id, text) values (w_pub, it, 'спину ровнее');
   -- тренер убрал задание с результатами — оно остаётся как «сам», результаты целы
   perform public.save_workout(json_build_object('id', w_pub, 'athlete_id', a1, 'date', current_date, 'title', 'Пн3', 'published', true)::jsonb,
     json_build_array(json_build_object('id', gen_random_uuid(), 'position', 0, 'name', 'Новое', 'result_type', 'check', 'planned_sets', 1))::jsonb);
-  select count(*) into n from public.set_results where item_id = it;
+  select count(*) into n from public.set_results where item_id = it and set_no = 1;
   assert n = 1, 'результаты пропали, когда тренер убрал задание';
   select count(*) into n from public.workout_items where id = it and self;
   assert n = 1, 'убранное задание с результатами не стало «сам»';

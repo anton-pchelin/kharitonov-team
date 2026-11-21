@@ -157,7 +157,7 @@ function AddOwnItem({ workout, exercises, onAdd }: {
         onChange={(e) => { setPicked(null); setQ(e.target.value) }} />
       {found.length > 0 && (
         <div className="suggest">
-          {found.map((e) => <button key={e.id} onClick={() => setPicked({ name: e.name, exercise_id: e.id })}>{e.name}</button>)}
+          {found.map((e) => <button key={e.id} onClick={() => { setPicked({ name: e.name, exercise_id: e.id }); if (e.default_result_type) setType(e.default_result_type); if (e.default_result_type === 'cardio') setSets(1) }}>{e.name}</button>)}
         </div>
       )}
       <div className="row">
