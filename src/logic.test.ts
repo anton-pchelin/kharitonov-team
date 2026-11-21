@@ -239,14 +239,16 @@ describe('сигналы таймера', async () => {
 })
 
 describe('кардио', async () => {
-  const { cardioLines, cardioSummary, compare, efficiency, pace500 } = await import('./lib/cardio')
+  const { cardioLines, cardioSummary, compare, efficiency, lsq, pace500, paceSeries, personalNorm } = await import('./lib/cardio')
   const row = (date: string, time_sec: number, meters: number, hr: number | null) => ({ date, time_sec, meters, hr })
   const d1 = row('2026-11-14', 1800, 7000, 140)
   const d2 = row('2026-11-21', 3600, 13500, 140)
 
   it('пример из задания: 30:00 · 7000 м · 140 и 60:00 · 13 500 м · 140', () => {
     expect(cardioLines(d1, [])).toEqual(['темп 2:09/500 · 1,67 м/удар', 'не с чем сравнить'])
-    expect(cardioLines(d2, [d1])).toEqual(['темп 2:13/500 · 1,61 м/удар', '▼ 4% к среднему (1 трен.)'])
+    // 30 и 60 минут не сравниваем: на длинной пульс сам ползёт вверх
+    expect(cardioLines(d2, [d1])).toEqual(['темп 2:13/500 · 1,61 м/удар', 'не с чем сравнить'])
+    expect(cardioLines(row('2026-11-21', 1800, 6720, 140), [d1])).toEqual(['темп 2:14/500 · 1,60 м/удар', '▼ 4% к среднему (1 трен.)'])
   })
   it('настоящие тренировки: гребля 30:05 · 6643 · 145, байк 30:08 · 10 710 · 143', () => {
     expect(cardioLines(row('2026-11-19', 1805, 6643, 145), [])).toEqual(['темп 2:16/500 · 1,52 м/удар', 'не с чем сравнить'])
@@ -255,20 +257,58 @@ describe('кардио', async () => {
   it('без пульса — темп есть, эффективности нет, в среднее не попадает', () => {
     const noHr = row('2026-11-20', 1800, 9000, null)
     expect(cardioLines(noHr, [])).toEqual(['темп 1:40/500 · без пульса — эффективность не считаем'])
-    expect(compare(d2, [noHr, d1])?.n).toBe(1)
+    expect(compare(row('2026-11-21', 1800, 7100, 140), [noHr, d1])?.n).toBe(1)
   })
-  it('в среднее — только пульс ±10, не больше 4 последних', () => {
-    expect(compare(d2, [row('2026-11-15', 1800, 9000, 160)])).toBeNull()
-    expect(compare(d2, [row('2026-11-15', 1800, 9000, 150), d1])?.n).toBe(2)
+  it('ступень 1: в среднее — только пульс ±10 и длительность ±30%, не больше 4 последних', () => {
+    const cur = row('2026-11-21', 1800, 7000, 140)
+    expect(compare(cur, [row('2026-11-15', 1800, 9000, 160)])).toBeNull()
+    expect(compare(cur, [row('2026-11-15', 2100, 9000, 150), d1])?.n).toBe(2)
+    expect(compare(cur, [row('2026-11-15', 2400, 9000, 140)])).toBeNull()  // 40 мин к 30 — уже не похоже
     const many = ['01', '02', '03', '04', '05'].map((d) => row('2026-11-' + d, 1800, 7000, 140))
-    expect(compare(d2, many)?.n).toBe(4)
+    expect(compare(cur, many)).toMatchObject({ n: 4, level: 1 })
+  })
+  // модель «как у живого человека»: на пульс +10 — на 0,2 м/с быстрее, каждые 10 минут — на 0,05 м/с медленнее
+  const model = (hr: number, min: number) => 3 + 0.02 * (hr - 120) - 0.005 * (min - 30)
+  const day = (k: number) => '2026-10-' + String(k + 1).padStart(2, '0')
+  const on = (k: number, hr: number, min: number, factor = 1) => row(day(k), min * 60, Math.round(model(hr, min) * min * 60 * factor), hr)
+  it('метод наименьших квадратов', () => {
+    expect(lsq([[1, 1], [1, 2], [1, 3]], [3, 5, 7])!.map((v) => Math.round(v * 1000) / 1000)).toEqual([1, 2])
+    expect(lsq([[1, 1], [1, 1]], [1, 2])).toBeNull()
+  })
+  it('ступень 2: от 6 тренировок на разном пульсе — сравнение с личной нормой на этом пульсе', () => {
+    const past = [125, 130, 135, 140, 150, 160].map((hr, k) => on(k, hr, 30))
+    expect(personalNorm(past.slice(0, 5))).toBeNull()  // 5 — мало, работает ступень 1
+    expect(personalNorm(past)?.level).toBe(2)
+    const c = compare(on(20, 155, 30, 1.05), past)!
+    expect(c.level).toBe(2)
+    expect(Math.round(c.pct)).toBe(5)
+    expect(cardioLines(on(20, 155, 30, 1.05), past)[1]).toBe('▲ 5% к норме на пульсе 155: обычно 2:15/500 (6 трен.)')
+    // пульс далеко за краем нормы — назад к ступени 1
+    expect(compare(on(20, 175, 30), past)?.level ?? 1).toBe(1)
+    // все на одном пульсе — норму не построить
+    expect(personalNorm([0, 1, 2, 3, 4, 5].map((k) => on(k, 140, 30)))).toBeNull()
+  })
+  it('ступень 3: от 12 тренировок разной длительности — учитывается и длительность', () => {
+    const past = Array.from({ length: 12 }, (_, k) => on(k, 125 + (k % 4) * 10, [20, 30, 45, 60][(k * 3) % 4]))
+    expect(personalNorm(past)?.level).toBe(3)
+    const c = compare(on(20, 140, 60), past)!
+    expect(c.level).toBe(3)
+    expect(Math.abs(c.pct)).toBeLessThan(0.5)  // ровно по норме — «как обычно», хоть и 60 минут
+    expect(cardioLines(on(20, 140, 60), past)[1]).toMatch(/^≈ как обычно на пульсе 140 за 60 мин: обычно/)
+  })
+  it('график «Темп на пульсе»: тренировки на разном пульсе по норме ложатся в одну линию', () => {
+    const past = [125, 130, 135, 140, 150, 160].map((hr, k) => on(k, hr, 30))
+    const s = paceSeries(past)
+    expect(s.label).toBe('Темп на пульсе 140 (меньше — лучше)')
+    expect(new Set(s.points.map((p) => p.y)).size).toBe(1)
+    expect(paceSeries(past.slice(0, 2)).label).toBe('Темп на 500 м (меньше — лучше)')
   })
   it('разница меньше 1% — «≈ как обычно»', () => {
     expect(cardioLines(row('2026-11-21', 1800, 7030, 140), [d1])[1]).toBe('≈ как обычно (1 трен.)')
   })
   it('строка в ленте тренера', () => {
     expect(cardioSummary('Гребля', d1, [])).toBe('Гребля 30:00 · 7000 м · пульс 140 · 1,67 м/уд')
-    expect(cardioSummary('Гребля', d2, [d1])).toBe('Гребля 1:00:00 · 13500 м · пульс 140 · 1,61 м/уд ▼ 4%')
+    expect(cardioSummary('Гребля', row('2026-11-21', 1800, 6720, 140), [d1])).toBe('Гребля 30:00 · 6720 м · пульс 140 · 1,60 м/уд ▼ 4%')
     expect(cardioSummary('Гребля', row('2026-11-21', 1800, 7000, null), [])).toBe('Гребля 30:00 · 7000 м')
   })
   it('ерунда в числах — эффективность не считаем', () => {

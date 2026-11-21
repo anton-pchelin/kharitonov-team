@@ -7,6 +7,7 @@ import { fmtNum, fmtTime, parseNum } from '../lib/format'
 import { addDays, fmtShort, mondayOf, today } from '../lib/dates'
 import type { PastSet } from '../lib/offline'
 import { isComplex } from '../lib/workout'
+import { paceSeries } from '../lib/cardio'
 
 type SetRow = PastSet & { workout_id: string; result_type: string }
 type ManualRecord = { id: string; name: string; weight: number | null; reps: number | null; time_sec: number | null; meters: number | null; date: string; note: string }
@@ -86,6 +87,10 @@ function ByExercise({ sets, lowerBetter }: { sets: SetRow[]; lowerBetter: Record
       {g && !withWeight && !cardio && g.sets.some((s) => s.time_sec != null) && (
         <LineChart unit="" format={fmtTime} series={[{ label: lower ? 'Лучшее время (меньше — лучше)' : 'Лучшее время', points: fieldSeries(g.sets, 'time_sec', lower) }]} />
       )}
+      {g && !withWeight && cardio && (() => {
+        const pace = paceSeries(g.sets)
+        return <><small className="muted">{pace.label}</small><LineChart unit="/500" format={(v) => fmtTime(Math.round(v))} series={[pace]} /></>
+      })()}
       {g && !withWeight && cardio && <LineChart unit="м" format={fmtNum} series={[{ label: 'Метры', points: fieldSeries(g.sets, 'meters') }]} />}
       {g && !withWeight && !cardio && !g.sets.some((s) => s.time_sec != null) && (
         <LineChart unit="повт" series={[{ label: 'Повторения', points: fieldSeries(g.sets, g.sets.some((s) => s.reps != null) ? 'reps' : g.sets.some((s) => s.meters != null) ? 'meters' : 'rounds') }]} />
