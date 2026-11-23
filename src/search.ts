@@ -1,3 +1,5 @@
+import type { ResultType } from './lib/workout'
+
 export type Exercise = {
   id: string
   name: string
@@ -8,6 +10,7 @@ export type Exercise = {
   video_url: string | null
   source: 'base' | 'coach' | 'athlete'
   lower_is_better?: boolean
+  default_result_type?: ResultType | null  // кардио-тренажёры — 'cardio'
 }
 
 const norm = (s: string) => s.toLowerCase().replaceAll('ё', 'е')

@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react'
-import { supabase } from '../supabase'
-import { addDays, today } from '../lib/dates'
+import { myId, supabase } from '../supabase'
+import { addDays, fmtDM, today } from '../lib/dates'
 import { loadGroups } from './WeekTools'
 
-type Row = { athlete_id: string; profiles: { name: string; email: string | null; city: string } | null }
+type Row = { athlete_id: string; access_until: string | null; profiles: { name: string; email: string | null; city: string } | null }
 
 export function Athletes() {
   const [rows, setRows] = useState<Row[] | null>(null)
@@ -22,14 +22,15 @@ export function Athletes() {
   }, [])
 
   useEffect(() => {
-    supabase
+    myId().then((me) => supabase
       .from('coach_athletes')
-      .select('athlete_id, profiles!coach_athletes_athlete_id_fkey(name, email, city)')
+      .select('athlete_id, access_until, profiles!coach_athletes_athlete_id_fkey(name, email, city)')
+      .eq('coach_id', me)
       .order('created_at', { ascending: false })
       .then(({ data, error }) => {
         if (error) alert('Не загрузилось: ' + error.message)
         setRows((data as unknown as Row[]) ?? [])
-      })
+      }))
   }, [])
 
   const invite = async () => {
@@ -68,7 +69,11 @@ export function Athletes() {
       {rows?.length === 0 && <p className="muted">Пока никого. Нажмите «Пригласить» и отправьте ссылку атлету.</p>}
       {rows?.map((r) => (
         <a key={r.athlete_id} className="card link" href={`#/athlete/${r.athlete_id}`}>
-          <b>{r.profiles?.name || r.profiles?.email}</b>
+          <b>{r.profiles?.name || r.profiles?.email}
+            {r.access_until && (r.access_until < today()
+              ? <span className="danger"> · закончился</span>
+              : <span className="muted"> · до {fmtDM(r.access_until)}</span>)}
+          </b>
           <span className="muted">{[pct[r.athlete_id], r.profiles?.city].filter(Boolean).join(' · ')}</span>
         </a>
       ))}

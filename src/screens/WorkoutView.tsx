@@ -1,12 +1,14 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { DiagnosticButton, recordFailure } from '../lib/diagnostics'
 import { supabase } from '../supabase'
 import { Markup } from '../lib/markup'
 import { Video } from '../lib/video'
 import { fmtNum, fmtTime, parseNum, parseTime } from '../lib/format'
-import { itemLabels, resultLabel, type ResultType, type Workout, type WorkoutItem } from '../lib/workout'
+import { isComplex, itemLabels, resultLabel, type ResultType, type Workout, type WorkoutItem } from '../lib/workout'
 import { previousSets, type Comment, type PastSet, type SetResult } from '../lib/offline'
 import { exerciseKey, isRecordSet, matchSet, maxFor, pctWeight, type MaxRecord } from '../lib/progress'
 import { platesFor } from '../lib/plates'
+import { cardioLines, hrOk } from '../lib/cardio'
 
 export type ViewProps = {
   workout: Workout
@@ -21,19 +23,20 @@ export type ViewProps = {
   onMax?: (item: WorkoutItem, weight: number) => void
   onSet?: (r: SetResult) => void
   onUnset?: (itemId: string, setNo: number) => void
-  onComment?: (itemId: string | null, text: string) => void
+  onComment?: (itemId: string | null, text: string, id: string) => void | Promise<void>
   onVideo?: (itemId: string, text: string, file: File) => Promise<void>  // атлет прикладывает видео подхода
   extra?: (item: WorkoutItem) => ReactNode  // доп. кнопки задания (видео, таймер — следующие этапы)
+  onDelete?: (item: WorkoutItem | null) => void  // атлет удаляет своё: задание «сам» или (null) свою тренировку
 }
 
-type Field = 'weight' | 'reps' | 'time_sec' | 'meters' | 'calories' | 'rounds'
+type Field = 'weight' | 'reps' | 'time_sec' | 'meters' | 'calories' | 'rounds' | 'hr'
 const FIELDS: Record<ResultType, Field[]> = {
   weight_reps: ['weight', 'reps'], reps: ['reps'], weight: ['weight'], time: ['time_sec'],
-  meters: ['meters'], calories: ['calories'], rounds: ['rounds'], check: [],
+  meters: ['meters'], calories: ['calories'], rounds: ['rounds'], check: [], cardio: ['time_sec', 'meters', 'hr'],
 }
-const UNIT: Record<Field, string> = { weight: 'кг', reps: 'повт', time_sec: 'мм:сс', meters: 'м', calories: 'ккал', rounds: 'кругов' }
+const UNIT: Record<Field, string> = { weight: 'кг', reps: 'повт', time_sec: 'мм:сс', meters: 'м', calories: 'ккал', rounds: 'кругов', hr: 'пульс' }
 const show = (f: Field, v: number | null | undefined) => (f === 'time_sec' ? fmtTime(v) : fmtNum(v))
-const parse = (f: Field, s: string) => (f === 'time_sec' ? parseTime(s) : f === 'reps' || f === 'rounds' ? (parseNum(s) == null ? null : Math.round(parseNum(s)!)) : parseNum(s))
+const parse = (f: Field, s: string) => (f === 'time_sec' ? parseTime(s) : f === 'reps' || f === 'rounds' || f === 'hr' ? (parseNum(s) == null ? null : Math.round(parseNum(s)!)) : parseNum(s))
 
 /** Сколько заданий сделано: у задания есть хотя бы один отмеченный или заполненный подход. */
 export function progress(items: WorkoutItem[], results: SetResult[]) {
@@ -52,7 +55,15 @@ export function WorkoutView(p: ViewProps) {
 
   return (
     <article className="workout">
-      <h3>{p.workout.title || 'Тренировка'} {p.workout.self && <span className="tag">сам</span>}</h3>
+      <div className="row-between">
+        <h3>{p.workout.title || 'Тренировка'} {p.workout.self && <span className="tag">сам</span>}</h3>
+        {p.workout.self && p.onDelete && (
+          <details className="menu">
+            <summary aria-label="Меню тренировки">⋯</summary>
+            <div className="menu-list"><button onClick={() => p.onDelete!(null)}>Удалить</button></div>
+          </details>
+        )}
+      </div>
       {p.workout.prescription && <Markup text={p.workout.prescription} />}
       {plan.map((it, i) => (
         <ItemView key={it.id} {...p} item={it} label={labels[i]}
@@ -87,7 +98,10 @@ function ItemView(p: ViewProps & { item: WorkoutItem; label: string; note: strin
             onClick={() => put(1, { done: !mine[0]?.done })}>✓</button>
         ) : <b className="item-label">{p.label}</b>}
         <b className="task-name">{item.name}</b>
-        {item.result_type !== 'check' && <span className="muted">{item.planned_sets}× {resultLabel(item.result_type)}</span>}
+        {item.result_type !== 'check' && <span className="muted">{isComplex(item) ? '' : `${item.planned_sets}× `}{resultLabel(item.result_type)}</span>}
+        {item.self && !p.workout.self && p.onDelete && (
+          <button className="link-btn" onClick={() => p.onDelete!(item)} aria-label={`Удалить «${item.name}»`}>Удалить</button>
+        )}
       </div>
       {item.pct != null && <PctHint {...p} item={item} />}
       <Markup text={item.plan_text} />
@@ -100,9 +114,13 @@ function ItemView(p: ViewProps & { item: WorkoutItem; label: string; note: strin
           record={isRecordSet(mine.find((r) => r.set_no === n)?.weight, mine.find((r) => r.set_no === n)?.reps, earlier)}
           gym={p.gym} pctKg={item.pct != null && p.maxes ? (() => { const m = maxFor(item, p.history, p.maxes); return m ? pctWeight(item.pct, m) : null })() : null}
           editable={p.editable} onPut={(patch) => put(n, patch)} />
-      ))}
+      )).flatMap((row, k) => {
+        const v = mine.find((r) => r.set_no === k + 1)
+        const lines = item.result_type === 'cardio' && v ? cardioLines(v, earlier) : []
+        return [row, ...lines.map((l, j) => <small key={`c${k}-${j}`} className="cardio-line">{l}</small>)]
+      })}
       {item.result_type !== 'check' && prev.length > 0 && (
-        <small className="muted">прошлый раз: {prev.map((s) => FIELDS[item.result_type].map((f) => show(f, s[f])).filter(Boolean).join('×')).join(', ')}</small>
+        <small className="muted">прошлый раз: {prev.map((s) => FIELDS[item.result_type].map((f) => show(f, s[f])).filter(Boolean).join(item.result_type === 'cardio' ? ' · ' : '×')).join(', ')}</small>
       )}
       {p.editable && item.result_type !== 'check' && (
         <button className="link-btn" onClick={() => setExtraRows(extraRows + 1)}>+ подход</button>
@@ -135,6 +153,8 @@ function SetRow({ n, type, value, hint, record, editable, onPut, gym, pctKg }: {
   const [draft, setDraft] = useState<Partial<Record<Field, string>>>({})
   const [calc, setCalc] = useState(false)
   const text = (f: Field) => draft[f] ?? show(f, value?.[f])
+  // ерунда в кардио (0 метров, пульс 300) — подсветить; сохранять не мешаем
+  const bad = (f: Field) => type === 'cardio' && value?.[f] != null && (f === 'hr' ? !hrOk(value.hr) : Number(value[f]) <= 0)
   // ввёл повторы — в поле веса серым вес той же трудности, что в прошлый раз (и наоборот)
   const typed = (f: 'weight' | 'reps') => (draft[f] !== undefined ? parseNum(draft[f]!) : value?.[f]) ?? null
   const match: Partial<Record<Field, number>> = type === 'weight_reps' && hint ? matchSet(hint, { weight: typed('weight'), reps: typed('reps') }) : {}
@@ -149,8 +169,8 @@ function SetRow({ n, type, value, hint, record, editable, onPut, gym, pctKg }: {
       <span className="set-no">{record ? '🏆' : n}</span>
       {fields.map((f, i) => (
         <span key={f} className="set-field">
-          {i > 0 && <span className="muted">×</span>}
-          <input inputMode={f === 'time_sec' ? 'numeric' : 'decimal'} disabled={!editable} aria-label={`${UNIT[f]}, подход ${n}`}
+          {i > 0 && type !== 'cardio' && <span className="muted">×</span>}
+          <input inputMode={f === 'time_sec' || f === 'hr' ? 'numeric' : 'decimal'} className={bad(f) ? 'bad' : undefined} disabled={!editable} aria-label={`${UNIT[f]}, подход ${n}`}
             placeholder={(match[f] != null ? '≈ ' + show(f, match[f]) : show(f, hint?.[f])) || (f === 'weight' ? '' : UNIT[f])} value={text(f)}
             onChange={(e) => setDraft((d) => ({ ...d, [f]: e.target.value }))}
             onBlur={() => commit(f)} onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()} />
@@ -174,13 +194,16 @@ function Comments(p: ViewProps & { itemId: string | null; list: Comment[] }) {
   const [text, setText] = useState('')
   const [open, setOpen] = useState(false)
   const [busy, setBusy] = useState('')
+  const [sending, setSending] = useState(false)
+  const [failed, setFailed] = useState(false)
+  const pendingId = useRef<string | null>(null)
   const canWrite = !!p.onComment
   if (!p.list.length && !canWrite) return null
   return (
     <div className="comments">
       {p.list.map((c) => (
         <div key={c.id} className={'comment' + (c.author_id === p.me ? ' mine' : '')}>
-          💬 {c.author_id !== p.me && <b>{p.names[c.author_id] ?? ''}: </b>}{c.text}
+          💬 {c.author_id !== p.me && <b>{p.names[c.author_id] ?? ''}: </b>}<span className="pre">{c.text}</span>
           {c.video_path?.startsWith('local:') && <small className="muted"> 🎬 видео отправится, когда появится сеть</small>}
           {c.video_path && !c.video_path.startsWith('local:') && <CommentVideo path={c.video_path} />}
           {c.video_deleted && <small className="muted"> 🎬 видео удалено (старше 30 дней)</small>}
@@ -188,18 +211,31 @@ function Comments(p: ViewProps & { itemId: string | null; list: Comment[] }) {
       ))}
       {canWrite && !open && <button className="link-btn" onClick={() => setOpen(true)}>💬 {p.itemId ? 'Комментарий' : 'Комментарий к тренировке'}</button>}
       {canWrite && open && (
-        <form className="comment-form" onSubmit={(e) => {
+        <form className="comment-form" onSubmit={async (e) => {
           e.preventDefault()
-          if (!text.trim()) return
-          p.onComment!(p.itemId, text.trim())
-          setText('')
-          setOpen(false)
+          if (!text.trim() || sending || busy) return
+          const id = pendingId.current ?? crypto.randomUUID()
+          pendingId.current = id
+          setSending(true)
+          try {
+            await p.onComment!(p.itemId, text.trim(), id)
+            pendingId.current = null
+            setFailed(false)
+            setText('')
+            setOpen(false)
+          } catch (cause) {
+            recordFailure(p.editable ? 'Тренировки' : location.hash.startsWith('#/plan') ? 'План' : 'Лента', 'Отправка комментария', cause)
+            setFailed(true)
+          } finally {
+            setSending(false)
+          }
         }}>
-          <textarea rows={2} value={text} autoFocus onChange={(e) => setText(e.target.value)} placeholder="Например: резина синяя" />
-          <button className="btn small">Отправить</button>
+          <textarea rows={2} value={text} autoFocus readOnly={sending || failed} onChange={(e) => setText(e.target.value)} placeholder="Например: резина синяя" />
+          <button className="btn small" disabled={sending || !!busy || !text.trim()}>{sending ? 'Отправляю…' : failed ? 'Повторить' : 'Отправить'}</button>
+          {failed && <><p className="error" role="alert">Не удалось отправить комментарий.</p><DiagnosticButton /></>}
           {p.onVideo && p.itemId && (
             <label className="btn small secondary">{busy || '🎬 Прикрепить видео'}
-              <input type="file" accept="video/*" hidden disabled={!!busy} onChange={async (e) => {
+              <input type="file" accept="video/*" hidden disabled={!!busy || sending} onChange={async (e) => {
                 const f = e.target.files?.[0]
                 if (!f) return
                 setBusy('Готовлю видео…')

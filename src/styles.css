@@ -71,6 +71,7 @@ input:focus, textarea:focus, select:focus { outline: 2px solid var(--primary); o
 .muted { color: var(--muted); font-weight: 400; }
 .note { padding: 12px 14px; border-radius: var(--radius); background: var(--done-bg); }
 .error { padding: 12px 14px; border-radius: var(--radius); background: #FDE2E1; color: #8A1C17; }
+.danger { color: #E5484D; font-weight: 600; }  /* красный текст: читается и в светлой, и в тёмной теме */
 
 .ex-list { display: flex; flex-direction: column; }
 .ex-item { display: flex; gap: 12px; align-items: center; cursor: pointer; }
@@ -126,6 +127,10 @@ main:has(.week) { max-width: 1200px; }
 .item-head { display: flex; align-items: center; gap: 8px; }
 .item-label { min-width: 28px; }
 .item-name { flex: 1; font-weight: 700; }
+/* текст задания: сразу на 6 строк и растёт вместе с текстом, без прокрутки внутри поля */
+.workout-fields { border: 0; padding: 0; margin: 0; min-inline-size: 0; }
+.editor > .workout-fields { display: grid; gap: 10px; }
+.plan-text { min-height: 9em; field-sizing: content; resize: vertical; }
 .handle { touch-action: none; cursor: grab; min-width: 36px; min-height: 44px; border: 0; background: none; color: var(--muted); font-size: 1.1rem; }
 .block-note { font-weight: 600; }
 .format-bar { display: flex; gap: 4px; }
@@ -138,6 +143,7 @@ main:has(.week) { max-width: 1200px; }
 .suggest small { padding: 6px 8px 2px; }
 .suggest button { padding: 10px 8px; text-align: left; font: inherit; color: var(--text); background: none; border: 0; border-radius: 10px; cursor: pointer; }
 .suggest button:hover { background: var(--secondary); }
+.suggest button.active { background: var(--secondary); color: var(--on-secondary); }
 .markup p { margin: 0 0 4px; }
 .markup ul { margin: 0 0 4px; padding-left: 20px; }
 .video-link { padding: 6px 0; background: none; border: 0; font: inherit; color: var(--text); font-weight: 600; cursor: pointer; text-decoration: underline; }
@@ -243,6 +249,9 @@ label.btn { display: flex; align-items: center; justify-content: center; color: 
 .plate-btn { flex: none; min-width: 40px; min-height: 40px; border: 0; border-radius: 10px; background: var(--secondary); cursor: pointer; }
 .plates { flex-basis: 100%; display: flex; flex-direction: column; gap: 6px; padding: 8px; border-radius: 12px; background: var(--card); border: 1px solid var(--line); }
 .set-row { flex-wrap: wrap; }
+/* на узком телефоне (360 px) кнопка блинов съедала поле веса — «100» обрезалось до «10» */
+.set-field input { min-width: 0; padding-inline: 4px; }
+.set-field:has(.plate-btn) { flex: 1.5; }
 
 /* ── Оформление в духе macOS: боковое меню на ПК, вкладки с иконками на телефоне ── */
 :root { font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI Variable Text', 'Segoe UI', system-ui, Roboto, sans-serif; letter-spacing: -0.01em; }
@@ -335,6 +344,10 @@ label.btn { display: flex; align-items: center; justify-content: center; color: 
   .plan-tools { flex-wrap: nowrap; overflow-x: auto; padding-bottom: 4px; scrollbar-width: none; }
   .plan-tools > * { flex: none; white-space: nowrap; }
   .plan-tools .remind-now { flex-wrap: nowrap; }
+  /* «⋯» под палец: на телефоне 48 px */
+  .menu summary { min-width: 48px; min-height: 48px; }
+  .wcard .menu { top: 0; right: 0; }
+  .wcard-open { padding-right: 48px; }
 }
 
 /* Полоса недели у атлета: число, день, точка-отметка тренировки */
@@ -349,3 +362,11 @@ label.btn { display: flex; align-items: center; justify-content: center; color: 
 .week-strip .dot { width: 8px; height: 8px; border-radius: 50%; border: 2px solid transparent; box-sizing: border-box; }
 .week-strip .dot.planned { border-color: var(--text); }
 .week-strip .dot.done { background: #2E9E4F; border-color: #2E9E4F; }
+
+/* задание на экране таймера: «под цифрами» листается внутри карточки, «по кнопке» — шторка поверх */
+.timer-task { max-height: 34vh; overflow-y: auto; flex: none; }
+.timer-face.large .timer-big { font-size: clamp(5rem, 30vw, 12rem); }
+.timer-sheet { position: fixed; left: 0; right: 0; bottom: 0; z-index: 51; max-height: 70vh; overflow-y: auto; margin: 0; padding: 16px 16px calc(env(safe-area-inset-bottom) + 16px); border-radius: var(--radius) var(--radius) 0 0; box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.25); display: flex; flex-direction: column; gap: 8px; }
+.cardio-line { display: block; padding: 0 6px 2px 40px; color: var(--muted); }
+.set-field input.bad { outline: 2px solid #E5484D; }  /* красный, как .danger: и в светлой, и в тёмной теме */
+.feed-cardio { display: block; font-size: 0.95rem; }

@@ -61,6 +61,16 @@ describe('конструктор тренировки', async () => {
     expect(embedUrl('https://www.youtube.com/watch?v=xyz&t=1')).toBe('https://www.youtube.com/embed/xyz')
     expect(embedUrl('https://example.com/video.mp4')).toBeNull()
   })
+  it('вставка из другой тренировки продолжает номера, суперсеты не сливаются', async () => {
+    const { appendItems } = await import('./lib/workout')
+    const mk = (id: string, superset: number | null, self = false) => ({ id, position: 0, exercise_id: null, name: id, plan_text: '', video_url: null, result_type: 'reps' as const, planned_sets: 1, superset, block_note: '', self })
+    const mine = [mk('a', null), mk('b', 1), mk('c', 1)]
+    const other = [mk('d', 1), mk('e', 1), mk('f', null), mk('сам', null, true)]
+    const all = appendItems(mine, other)
+    expect(itemLabels(all)).toEqual(['1', '2А', '2Б', '3А', '3Б', '4'])
+    expect(all.map((i) => i.position)).toEqual([0, 0, 0, 3, 4, 5])
+    expect(all.slice(3).every((i) => !['d', 'e', 'f'].includes(i.id))).toBe(true)  // новые id
+  })
   it('считает недели с понедельника', () => {
     expect(mondayOf('2026-11-15')).toBe('2026-11-09')
     expect(mondayOf('2026-11-09')).toBe('2026-11-09')
@@ -86,6 +96,17 @@ describe('без интернета', async () => {
     c = applyLocal(c, { t: 'complete', id: 'w', at: '2026-11-09T10:00:00Z' })
     expect(c.workouts[0].workout_items).toHaveLength(1)
     expect(c.workouts[0].completed_at).toBe('2026-11-09T10:00:00Z')
+  })
+  it('удаление своей тренировки и своего задания убирает и подходы', () => {
+    const item = { id: 'x', workout_id: 'w', position: 1000, exercise_id: null, name: 'Бицепс', plan_text: '', video_url: null, result_type: 'weight_reps' as const, planned_sets: 3, superset: null, block_note: '', self: true }
+    let c = applyLocal(base, { t: 'item', row: item })
+    c = applyLocal(c, { t: 'set', row: { item_id: 'x', set_no: 1, weight: 10, done: true } })
+    const noItem = applyLocal(c, { t: 'delete_item', id: 'x', workout_id: 'w' })
+    expect(noItem.workouts[0].workout_items).toEqual([])
+    expect(noItem.results).toEqual([])
+    const noWorkout = applyLocal(c, { t: 'delete_workout', id: 'w' })
+    expect(noWorkout.workouts).toEqual([])
+    expect(noWorkout.results).toEqual([])
   })
   it('«прошлый раз» — последняя более ранняя тренировка с тем же упражнением', () => {
     const h = (date: string, set_no: number, weight: number) => ({ item_id: date, set_no, weight, reps: 10, done: true, date, name: 'Присед', exercise_id: 'sq' })
@@ -176,4 +197,142 @@ it('подбор веса и повторов под прошлый подход
   expect(matchSet(prev, { weight: 90 })).toEqual({ reps: 9 })
   expect(matchSet(prev, { weight: 90, reps: 3 })).toEqual({})
   expect(matchSet({ weight: null, reps: 10 }, { reps: 5 })).toEqual({})
+})
+
+describe('доступ по оплате', async () => {
+  const { extendAccess, addMonth } = await import('./lib/dates')
+  it('+1 мес от даты окончания, а прошедший или пустой срок — от сегодня', () => {
+    expect(extendAccess('2026-12-20', '2026-12-15')).toBe('2027-01-20')
+    expect(extendAccess('2026-12-20', '2026-12-20')).toBe('2027-01-20')
+    expect(extendAccess('2026-12-20', '2026-12-25')).toBe('2027-01-25')
+    expect(extendAccess(null, '2026-11-20')).toBe('2026-12-20')
+    expect(addMonth('2027-01-31')).toBe('2027-02-28')
+  })
+})
+
+describe('сигналы таймера', async () => {
+  const { timerCues } = await import('./lib/timer')
+  const at = (cues: [number, string][], from: number, to: number) => cues.filter(([t]) => t >= from && t < to)
+
+  it('табата 20/10 × 8: только 5…1 в каждом отрезке, старт и финиш', () => {
+    const c = timerCues({ kind: 'tabata', work: 20, rest: 10, rounds: 8 })
+    expect(c[0]).toEqual([0, 'start'])
+    expect(c[c.length - 1]).toEqual([240, 'finish'])
+    expect(c.some(([, q]) => q === 'half' || q === 'ten')).toBe(false)
+    expect(at(c, 1, 30)).toEqual([[15, '5'], [16, '4'], [17, '3'], [18, '2'], [19, '1'], [20, 'next'], [25, '5'], [26, '4'], [27, '3'], [28, '2'], [29, '1']])
+    expect(c.filter(([, q]) => q === '1')).toHaveLength(16)
+  })
+  it('EMOM 12 мин: в каждой минуте «Половина» на 30-й, «10 секунд», 5…1', () => {
+    const c = timerCues({ kind: 'emom', minutes: 12 })
+    expect(at(c, 1, 60)).toEqual([[30, 'half'], [50, 'ten'], [55, '5'], [56, '4'], [57, '3'], [58, '2'], [59, '1']])
+    expect(c.filter(([, q]) => q === 'half').map(([t]) => t)).toEqual(Array.from({ length: 12 }, (_, i) => i * 60 + 30))
+    expect(c[c.length - 1]).toEqual([720, 'finish'])
+  })
+  it('АМРАП 12 мин: «Половина» на 6:00, «10 секунд» и 5…1 перед концом', () => {
+    expect(timerCues({ kind: 'amrap', minutes: 12 })).toEqual([[0, 'start'], [360, 'half'], [710, 'ten'],
+      [715, '5'], [716, '4'], [717, '3'], [718, '2'], [719, '1'], [720, 'finish']])
+  })
+  it('«на время» с лимитом 10 мин — от лимита; выключенные сигналы не звучат', () => {
+    expect(timerCues({ kind: 'fortime', minutes: 10 }).filter(([, q]) => q === 'half')).toEqual([[300, 'half']])
+    expect(timerCues({ kind: 'amrap', minutes: 12 }, { half: false, ten: true, count: false })).toEqual([[0, 'start'], [710, 'ten'], [720, 'finish']])
+  })
+})
+
+describe('кардио', async () => {
+  const { cardioLines, cardioSummary, compare, efficiency, lsq, pace500, paceSeries, personalNorm } = await import('./lib/cardio')
+  const row = (date: string, time_sec: number, meters: number, hr: number | null) => ({ date, time_sec, meters, hr })
+  const d1 = row('2026-11-14', 1800, 7000, 140)
+  const d2 = row('2026-11-21', 3600, 13500, 140)
+
+  it('пример из задания: 30:00 · 7000 м · 140 и 60:00 · 13 500 м · 140', () => {
+    expect(cardioLines(d1, [])).toEqual(['темп 2:09/500 · 1,67 м/удар', 'не с чем сравнить'])
+    // 30 и 60 минут не сравниваем: на длинной пульс сам ползёт вверх
+    expect(cardioLines(d2, [d1])).toEqual(['темп 2:13/500 · 1,61 м/удар', 'не с чем сравнить'])
+    expect(cardioLines(row('2026-11-21', 1800, 6720, 140), [d1])).toEqual(['темп 2:14/500 · 1,60 м/удар', '▼ 4% к среднему (1 трен.)'])
+  })
+  it('настоящие тренировки: гребля 30:05 · 6643 · 145, байк 30:08 · 10 710 · 143', () => {
+    expect(cardioLines(row('2026-11-19', 1805, 6643, 145), [])).toEqual(['темп 2:16/500 · 1,52 м/удар', 'не с чем сравнить'])
+    expect(cardioLines(row('2026-11-20', 1808, 10710, 143), [])).toEqual(['темп 1:24/500 · 2,49 м/удар', 'не с чем сравнить'])
+  })
+  it('без пульса — темп есть, эффективности нет, в среднее не попадает', () => {
+    const noHr = row('2026-11-20', 1800, 9000, null)
+    expect(cardioLines(noHr, [])).toEqual(['темп 1:40/500 · без пульса — эффективность не считаем'])
+    expect(compare(row('2026-11-21', 1800, 7100, 140), [noHr, d1])?.n).toBe(1)
+  })
+  it('ступень 1: в среднее — только пульс ±10 и длительность ±30%, не больше 4 последних', () => {
+    const cur = row('2026-11-21', 1800, 7000, 140)
+    expect(compare(cur, [row('2026-11-15', 1800, 9000, 160)])).toBeNull()
+    expect(compare(cur, [row('2026-11-15', 2100, 9000, 150), d1])?.n).toBe(2)
+    expect(compare(cur, [row('2026-11-15', 2400, 9000, 140)])).toBeNull()  // 40 мин к 30 — уже не похоже
+    const many = ['01', '02', '03', '04', '05'].map((d) => row('2026-11-' + d, 1800, 7000, 140))
+    expect(compare(cur, many)).toMatchObject({ n: 4, level: 1 })
+  })
+  // модель «как у живого человека»: на пульс +10 — на 0,2 м/с быстрее, каждые 10 минут — на 0,05 м/с медленнее
+  const model = (hr: number, min: number) => 3 + 0.02 * (hr - 120) - 0.005 * (min - 30)
+  const day = (k: number) => '2026-10-' + String(k + 1).padStart(2, '0')
+  const on = (k: number, hr: number, min: number, factor = 1) => row(day(k), min * 60, Math.round(model(hr, min) * min * 60 * factor), hr)
+  it('метод наименьших квадратов', () => {
+    expect(lsq([[1, 1], [1, 2], [1, 3]], [3, 5, 7])!.map((v) => Math.round(v * 1000) / 1000)).toEqual([1, 2])
+    expect(lsq([[1, 1], [1, 1]], [1, 2])).toBeNull()
+  })
+  it('ступень 2: от 6 тренировок на разном пульсе — сравнение с личной нормой на этом пульсе', () => {
+    const past = [125, 130, 135, 140, 150, 160].map((hr, k) => on(k, hr, 30))
+    expect(personalNorm(past.slice(0, 5))).toBeNull()  // 5 — мало, работает ступень 1
+    expect(personalNorm(past)?.level).toBe(2)
+    const c = compare(on(20, 155, 30, 1.05), past)!
+    expect(c.level).toBe(2)
+    expect(Math.round(c.pct)).toBe(5)
+    expect(cardioLines(on(20, 155, 30, 1.05), past)[1]).toBe('▲ 5% к норме на пульсе 155: обычно 2:15/500 (6 трен.)')
+    // пульс далеко за краем нормы — назад к ступени 1
+    expect(compare(on(20, 175, 30), past)?.level ?? 1).toBe(1)
+    // все на одном пульсе — норму не построить
+    expect(personalNorm([0, 1, 2, 3, 4, 5].map((k) => on(k, 140, 30)))).toBeNull()
+  })
+  it('ступень 3: от 12 тренировок разной длительности — учитывается и длительность', () => {
+    const past = Array.from({ length: 12 }, (_, k) => on(k, 125 + (k % 4) * 10, [20, 30, 45, 60][(k * 3) % 4]))
+    expect(personalNorm(past)?.level).toBe(3)
+    const c = compare(on(20, 140, 60), past)!
+    expect(c.level).toBe(3)
+    expect(Math.abs(c.pct)).toBeLessThan(0.5)  // ровно по норме — «как обычно», хоть и 60 минут
+    expect(cardioLines(on(20, 140, 60), past)[1]).toMatch(/^≈ как обычно на пульсе 140 за 60 мин: обычно/)
+  })
+  it('график «Темп на пульсе»: тренировки на разном пульсе по норме ложатся в одну линию', () => {
+    const past = [125, 130, 135, 140, 150, 160].map((hr, k) => on(k, hr, 30))
+    const s = paceSeries(past)
+    expect(s.label).toBe('Темп на пульсе 140 (меньше — лучше)')
+    expect(new Set(s.points.map((p) => p.y)).size).toBe(1)
+    expect(paceSeries(past.slice(0, 2)).label).toBe('Темп на 500 м (меньше — лучше)')
+  })
+  it('разница меньше 1% — «≈ как обычно»', () => {
+    expect(cardioLines(row('2026-11-21', 1800, 7030, 140), [d1])[1]).toBe('≈ как обычно (1 трен.)')
+  })
+  it('строка в ленте тренера', () => {
+    expect(cardioSummary('Гребля', d1, [])).toBe('Гребля 30:00 · 7000 м · пульс 140 · 1,67 м/уд')
+    expect(cardioSummary('Гребля', row('2026-11-21', 1800, 6720, 140), [d1])).toBe('Гребля 30:00 · 6720 м · пульс 140 · 1,60 м/уд ▼ 4%')
+    expect(cardioSummary('Гребля', row('2026-11-21', 1800, 7000, null), [])).toBe('Гребля 30:00 · 7000 м')
+  })
+  it('ерунда в числах — эффективность не считаем', () => {
+    expect(efficiency(row('2026-11-21', 1800, 7000, 30))).toBeNull()
+    expect(efficiency(row('2026-11-21', 0, 7000, 140))).toBeNull()
+    expect(pace500(row('2026-11-21', 1800, 0, 140))).toBeNull()
+  })
+})
+
+describe('комплекс', () => {
+  it('название из числа раундов и обратно', async () => {
+    const { complexName, complexRounds, isComplex } = await import('./lib/workout')
+    expect([1, 2, 5, 11, 21, 22, 112].map(complexName)).toEqual(['Комплекс · 1 раунд', 'Комплекс · 2 раунда', 'Комплекс · 5 раундов',
+      'Комплекс · 11 раундов', 'Комплекс · 21 раунд', 'Комплекс · 22 раунда', 'Комплекс · 112 раундов'])
+    expect(complexName(null)).toBe('Комплекс')
+    expect(complexRounds('Комплекс · 7 раундов')).toBe(7)
+    expect(complexRounds('Комплекс')).toBeNull()
+    expect(isComplex({ name: 'Комплекс · 3 раунда', exercise_id: null })).toBe(true)
+    expect(isComplex({ name: 'Комплексная разминка', exercise_id: null })).toBe(false)
+    expect(isComplex({ name: 'Комплекс', exercise_id: 'x' })).toBe(false)
+  })
+  it('у комплекса нет подсказки «прошлый раз»', async () => {
+    const { previousSets } = await import('./lib/offline')
+    const past = [{ item_id: 'a', set_no: 1, done: true, time_sec: 600, name: 'Комплекс · 5 раундов', exercise_id: null, date: '2026-11-01' }]
+    expect(previousSets(past, { name: 'Комплекс · 5 раундов', exercise_id: null }, '2026-11-10')).toEqual([])
+  })
 })

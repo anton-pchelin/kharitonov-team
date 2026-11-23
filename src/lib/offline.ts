@@ -2,7 +2,7 @@
 // всё введённое сразу пишется туда и встаёт в очередь отправки. Очередь уходит, как только есть сеть.
 import { supabase } from '../supabase'
 import { addDays, today } from './dates'
-import type { Workout, WorkoutItem } from './workout'
+import { isComplex, type Workout, type WorkoutItem } from './workout'
 import type { MaxRecord } from './progress'
 import { delBlob, getBlob, videoExt } from './videoUpload'
 
@@ -15,6 +15,7 @@ export type SetResult = {
   meters?: number | null
   calories?: number | null
   rounds?: number | null
+  hr?: number | null  // средний пульс (кардио)
   done: boolean
 }
 export type Comment = {
@@ -35,6 +36,8 @@ export type Op =
   | { t: 'complete'; id: string; at: string }
   | { t: 'record'; row: MaxRecord & { id: string; athlete_id: string } }
   | { t: 'video'; row: Comment }  // файл лежит в IndexedDB под ключом row.id
+  | { t: 'delete_workout'; id: string }  // только своя тренировка атлета
+  | { t: 'delete_item'; id: string; workout_id: string }  // только своё задание («+ моё упражнение»)
 
 const empty = (): Cache => ({ workouts: [], results: [], comments: [], history: [], records: [], syncedAt: null })
 const sameSet = (a: { item_id: string; set_no: number }, b: { item_id: string; set_no: number }) =>
@@ -55,6 +58,20 @@ export function applyLocal(c: Cache, op: Op): Cache {
     case 'complete': return { ...c, workouts: c.workouts.map((w) => (w.id === op.id ? { ...w, completed_at: w.completed_at ?? op.at } : w)) }
     case 'record': return { ...c, records: [...(c.records ?? []), op.row] }
     case 'video': return c.comments.some((x) => x.id === op.row.id) ? c : { ...c, comments: [...c.comments, { ...op.row, video_path: 'local:' + op.row.id }] }
+    case 'delete_workout': {
+      const items = new Set(c.workouts.find((w) => w.id === op.id)?.workout_items?.map((i) => i.id))
+      return {
+        ...c,
+        workouts: c.workouts.filter((w) => w.id !== op.id),
+        results: c.results.filter((r) => !items.has(r.item_id)),
+        comments: c.comments.filter((x) => x.workout_id !== op.id),
+      }
+    }
+    case 'delete_item': return {
+      ...c,
+      workouts: c.workouts.map((w) => (w.id === op.workout_id ? { ...w, workout_items: w.workout_items?.filter((i) => i.id !== op.id) } : w)),
+      results: c.results.filter((r) => r.item_id !== op.id),
+    }
   }
 }
 
@@ -72,6 +89,8 @@ async function send(op: Op, userId: string): Promise<{ error: { code?: string; m
     case 'item': return supabase.from('workout_items').upsert({ ...op.row, self: true }, { onConflict: 'id', ignoreDuplicates: true })
     case 'complete': return supabase.rpc('complete_workout', { p_id: op.id, p_at: op.at })
     case 'record': return supabase.from('records').upsert(op.row, { onConflict: 'id', ignoreDuplicates: true })
+    case 'delete_workout': return supabase.from('workouts').delete().eq('id', op.id).eq('self', true)
+    case 'delete_item': return supabase.from('workout_items').delete().eq('id', op.id).eq('self', true)
     case 'video': {
       const blob = await getBlob(op.row.id)
       if (!blob) return { error: null }  // уже ушло раньше
@@ -158,7 +177,7 @@ export class OfflineStore {
     const [w, r, rec] = await Promise.all([
       supabase.from('workouts').select('*, workout_items(*)').eq('athlete_id', this.userId).gte('date', from).lte('date', to),
       supabase.from('set_results')
-        .select('item_id, set_no, weight, reps, time_sec, meters, calories, rounds, done, workout_items!inner(name, exercise_id, workouts!inner(date))')
+        .select('item_id, set_no, weight, reps, time_sec, meters, calories, rounds, hr, done, workout_items!inner(name, exercise_id, workouts!inner(date))')
         .eq('athlete_id', this.userId).gte('workout_items.workouts.date', addDays(today(), -365)),
       supabase.from('records').select('exercise_id, name, weight, reps').eq('athlete_id', this.userId),
     ])
@@ -188,8 +207,19 @@ const norm = (s: string) => s.toLowerCase().replaceAll('ё', 'е').trim()
 
 /** Подходы этого упражнения с прошлой тренировки (раньше даты date). */
 export function previousSets(history: PastSet[], item: Pick<WorkoutItem, 'name' | 'exercise_id'>, date: string): PastSet[] {
+  if (isComplex(item)) return []  // комплексы все разные — сравнивать не с чем
   const same = history.filter((h) => h.date < date &&
     (item.exercise_id && h.exercise_id ? h.exercise_id === item.exercise_id : norm(h.name) === norm(item.name)))
   const last = same.reduce((d, h) => (h.date > d ? h.date : d), '')
   return same.filter((h) => h.date === last).sort((a, b) => a.set_no - b.set_no)
+}
+
+/** Прошлые кардио-подходы атлетов (с пульсом) — тренеру для сравнения «▲ 4% к среднему». */
+export async function loadCardioHistory(athleteIds: string[]): Promise<(PastSet & { athlete_id: string })[]> {
+  if (!athleteIds.length) return []
+  const { data } = await supabase.from('set_results')
+    .select('item_id, set_no, time_sec, meters, hr, done, athlete_id, workout_items!inner(name, exercise_id, result_type, workouts!inner(date))')
+    .in('athlete_id', athleteIds).not('hr', 'is', null).eq('workout_items.result_type', 'cardio')
+  type Row = SetResult & { athlete_id: string; workout_items: { name: string; exercise_id: string | null; workouts: { date: string } } }
+  return ((data ?? []) as unknown as Row[]).map(({ workout_items: i, ...s }) => ({ ...s, name: i.name, exercise_id: i.exercise_id, date: i.workouts.date }))
 }

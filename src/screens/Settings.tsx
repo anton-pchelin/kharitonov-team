@@ -2,7 +2,9 @@ import { useEffect, useState, type ReactNode } from 'react'
 import { supabase, type Profile } from '../supabase'
 import { PALETTES, saveLocalTheme, type ThemeMode } from '../theme'
 import { InstallHint } from './InstallHint'
+import { buildVersion, DiagnosticButton } from '../lib/diagnostics'
 import { Icon, type IconName } from '../lib/icons'
+import { readTimerSettings, saveTimerSettings, type TimerSettings } from '../lib/timer'
 
 type Section = [key: string, title: string, icon: IconName, body: ReactNode]
 
@@ -35,7 +37,7 @@ function Row({ label, hint, children }: { label: ReactNode; hint?: ReactNode; ch
  */
 export function Settings({ profile, onChange, onSwitchView }: {
   profile: Profile; onChange: (p: Partial<Profile>) => Promise<void>
-  /** есть только у тренера: смотреть приложение как атлет */
+  /** есть только у тренера, который сам занимается у другого тренера: режим «Атлет» */
   onSwitchView?: (athlete: boolean) => void
 }) {
   const isCoach = profile.role === 'coach'
@@ -47,9 +49,9 @@ export function Settings({ profile, onChange, onSwitchView }: {
   const sections: Section[] = [
     ['account', 'Учётная запись', 'user', (
       <div className="group">
-        <Row label={profile.name || 'Без имени'} hint={onSwitchView ? 'тренер' : 'атлет'} />
+        <Row label={profile.name || 'Без имени'} hint={isCoach ? 'тренер' : 'атлет'} />
         {onSwitchView && (
-          <Row label="Смотреть как" hint="как атлет вы видите тренировки, которые назначили себе">
+          <Row label="Режим" hint="как атлет вы видите тренировки от своего тренера">
             <div className="segmented">
               <button className={isCoach ? 'active' : ''} onClick={() => onSwitchView(false)}>Тренер</button>
               <button className={isCoach ? '' : 'active'} onClick={() => onSwitchView(true)}>Атлет</button>
@@ -94,8 +96,9 @@ export function Settings({ profile, onChange, onSwitchView }: {
       </>
     )],
     ...(!isCoach ? [['gym', 'Гриф и блины', 'dumbbell', <GymSettings key="gym" profile={profile} onChange={onChange} />] as Section] : []),
+    ...(!isCoach ? [['timer', 'Таймер', 'timer', <TimerSection key="timer" />] as Section] : []),
     ...(isCoach ? [['storage', 'Хранилище', 'disk', <StorageUsage key="storage" />] as Section] : []),
-    ['app', 'Приложение', 'app', <div className="group" key="app"><div className="set-line"><InstallHint /></div></div>],
+    ['app', 'Приложение', 'app', <div className="group" key="app"><div className="set-line"><InstallHint /></div><Row label="Сведения о приложении" hint={'Версия ' + buildVersion}><DiagnosticButton /></Row></div>],
   ]
   const [active, setActive] = useState(sections[0][0])
 
@@ -157,5 +160,48 @@ function GymSettings({ profile, onChange }: { profile: Profile; onChange: (p: Pa
         }} />
       </Row>
     </div>
+  )
+}
+
+const SIGNALS: ['half' | 'ten' | 'count', string][] = [['half', 'Половина времени'], ['ten', 'За 10 секунд'], ['count', 'Обратный отсчёт 5…1']]
+const SOUNDS: [TimerSettings['sound'], string][] = [['voice', 'Голос'], ['beep', 'Сигналы'], ['off', 'Без звука']]
+
+/** Таймер комплекса: какие сигналы, звук, громкость, вибрация, вид задания. Хранится в телефоне. */
+function TimerSection() {
+  const [s, setS] = useState(readTimerSettings)
+  const set = (patch: Partial<TimerSettings>) => { const next = { ...s, ...patch }; setS(next); saveTimerSettings(next) }
+  const canVibrate = 'vibrate' in navigator
+  return (
+    <>
+      <div className="group">
+        {SIGNALS.map(([k, label]) => (
+          <label key={k} className="set-line switch-line">
+            <span className="set-label">{label}</span>
+            <input type="checkbox" className="toggle" checked={s[k]} onChange={(e) => set({ [k]: e.target.checked })} />
+          </label>
+        ))}
+        <Row label="Звук">
+          <div className="segmented">
+            {SOUNDS.map(([k, label]) => <button key={k} className={s.sound === k ? 'active' : ''} onClick={() => set({ sound: k })}>{label}</button>)}
+          </div>
+        </Row>
+        <Row label="Громкость" hint="Не громче звука телефона">
+          <input type="range" min={0} max={1} step={0.1} value={s.volume} aria-label="Громкость"
+            onChange={(e) => set({ volume: Number(e.target.value) })} />
+        </Row>
+        <label className="set-line switch-line">
+          <span className="set-label">Вибрация{!canVibrate && <small className="muted">не работает на этом телефоне (iPhone)</small>}</span>
+          <input type="checkbox" className="toggle" checked={s.vibrate && canVibrate} disabled={!canVibrate} onChange={(e) => set({ vibrate: e.target.checked })} />
+        </label>
+        <Row label="Задание на экране таймера">
+          <div className="segmented">
+            <button className={s.view === 'under' ? 'active' : ''} onClick={() => set({ view: 'under' })}>Под цифрами</button>
+            <button className={s.view === 'sheet' ? 'active' : ''} onClick={() => set({ view: 'sheet' })}>По кнопке</button>
+          </div>
+        </Row>
+      </div>
+      <p className="muted group-note">Работает без интернета. На iPhone в беззвучном режиме звук сайта может не играть — включите звонок.
+        Нет русского голоса в телефоне — вместо слов будут сигналы.</p>
+    </>
   )
 }

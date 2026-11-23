@@ -14,7 +14,7 @@ export async function loadExercises(): Promise<Exercise[]> {
     for (let from = 0; ; from += PAGE) {
       const { data, error } = await supabase
         .from('exercises')
-        .select('id, name, aliases, muscles, equipment, image_url, video_url, source, lower_is_better')
+        .select('id, name, aliases, muscles, equipment, image_url, video_url, source, lower_is_better, default_result_type')
         .order('name')
         .range(from, from + PAGE - 1)
       if (error) throw error

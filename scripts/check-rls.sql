@@ -16,11 +16,14 @@ declare
   base_id uuid;
   w_pub uuid; w_draft uuid; w_self uuid; it uuid; it_draft uuid; w_old uuid; prog uuid; mon date := public.monday(current_date + 14);
   n int;
+  d date; at20 timestamptz;
   t text;
 begin
   select count(*) into n from public.exercises where source = 'base';
   assert n >= 870, 'в базе мало упражнений: ' || n;
   select id into base_id from public.exercises where source = 'base' limit 1;
+  select count(*) into n from public.exercises where default_result_type = 'cardio' and name like '%(Concept2 %';
+  assert n = 3, 'нет трёх кардио-тренажёров Concept2: ' || n;
 
   insert into public.coach_emails values (mail1), (mail2);
   insert into auth.users (id, email) values
@@ -85,7 +88,14 @@ begin
   perform set_config('role', 'none', true);
   insert into public.invites (coach_id) values (coach1) returning token into inv_old;
   perform set_config('role', 'authenticated', true);
-  assert public.accept_invite(inv_old) = 'is_coach', 'тренер принял приглашение как атлет';
+  assert public.accept_invite(inv3) = 'own_invite', 'тренер принял своё же приглашение';
+  -- тренер может заниматься у другого тренера и остаётся тренером
+  assert public.accept_invite(inv_old) = 'ok', 'тренер не принял приглашение другого тренера';
+  assert public.my_coach_id() = coach1, 'тренер 2 не стал атлетом тренера 1';
+  assert public.is_coach(), 'тренер 2 потерял роль тренера';
+  perform set_config('role', 'none', true);
+  delete from public.coach_athletes where athlete_id = coach2;  -- дальше проверки считают атлетов тренера 1
+  perform set_config('role', 'authenticated', true);
 
   -- Атлет: прямые запросы к базе
   perform set_config('request.jwt.claims', json_build_object('sub', a1, 'role', 'authenticated')::text, true);
@@ -215,9 +225,14 @@ begin
   select id into it from public.workout_items where workout_id = w_pub and not self limit 1;
   select id into it_draft from public.workout_items where workout_id = w_draft limit 1;
   w_old := public.save_workout(json_build_object('athlete_id', a1, 'date', current_date - 10, 'title', 'Старая', 'published', true)::jsonb,
-    json_build_array(json_build_object('id', gen_random_uuid(), 'position', 0, 'name', 'Присед', 'result_type', 'weight_reps', 'planned_sets', 1))::jsonb);
+    json_build_array(json_build_object('id', gen_random_uuid(), 'position', 0, 'name', 'Гребля', 'result_type', 'cardio', 'planned_sets', 1))::jsonb);
   perform set_config('request.jwt.claims', json_build_object('sub', a1, 'role', 'authenticated')::text, true);
   insert into public.set_results (item_id, set_no, weight, reps, done) values (it, 1, 40, 10, true);
+  -- кардио (время, метры, пульс): атлет пишет пульс в свой подход
+  insert into public.set_results (item_id, set_no, time_sec, meters, hr, done) values (it, 3, 1800, 7000, 140, true);
+  update public.set_results set hr = 141 where item_id = it and set_no = 3;
+  get diagnostics n = row_count;
+  assert n = 1, 'атлет не смог поправить свой пульс';
   insert into public.comments (workout_id, item_id, text) values (w_pub, it, 'резина синяя');
   begin
     insert into public.set_results (item_id, set_no, weight) values (it_draft, 1, 1);
@@ -237,24 +252,37 @@ begin
     assert false, 'чужой атлет записал результат';
   exception when insufficient_privilege then null;
   end;
+  begin
+    insert into public.set_results (item_id, set_no, time_sec, meters, hr) values (it, 4, 1800, 7000, 150);
+    assert false, 'чужой атлет записал пульс';
+  exception when insufficient_privilege then null;
+  end;
+  update public.set_results set hr = 99 where item_id = it;
+  get diagnostics n = row_count;
+  assert n = 0, 'чужой атлет изменил пульс';
   select count(*) into n from public.set_results where item_id = it;
   assert n = 0, 'атлет видит чужие результаты';
   select count(*) into n from public.comments where workout_id = w_pub;
   assert n = 0, 'атлет видит чужие комментарии';
   perform public.complete_workout(w_pub);
   perform set_config('request.jwt.claims', json_build_object('sub', coach1, 'role', 'authenticated')::text, true);
-  select count(*) into n from public.set_results where item_id = it;
+  select count(*) into n from public.set_results where item_id = it and set_no = 1;
   assert n = 1, 'тренер не видит результаты атлета';
   update public.set_results set weight = 999 where item_id = it;
   get diagnostics n = row_count;
   assert n = 0, 'тренер изменил результат атлета';
+  update public.set_results set hr = 99 where item_id = it;
+  get diagnostics n = row_count;
+  assert n = 0, 'тренер изменил пульс атлета';
+  select hr into n from public.set_results where item_id = it and set_no = 3;
+  assert n = 141, 'тренер не видит пульс атлета';
   select count(*) into n from public.workouts where id = w_pub and completed_at is not null;
   assert n = 1, 'атлет не смог завершить тренировку';
   insert into public.comments (workout_id, item_id, text) values (w_pub, it, 'спину ровнее');
   -- тренер убрал задание с результатами — оно остаётся как «сам», результаты целы
   perform public.save_workout(json_build_object('id', w_pub, 'athlete_id', a1, 'date', current_date, 'title', 'Пн3', 'published', true)::jsonb,
     json_build_array(json_build_object('id', gen_random_uuid(), 'position', 0, 'name', 'Новое', 'result_type', 'check', 'planned_sets', 1))::jsonb);
-  select count(*) into n from public.set_results where item_id = it;
+  select count(*) into n from public.set_results where item_id = it and set_no = 1;
   assert n = 1, 'результаты пропали, когда тренер убрал задание';
   select count(*) into n from public.workout_items where id = it and self;
   assert n = 1, 'убранное задание с результатами не стало «сам»';
@@ -378,16 +406,91 @@ begin
   select count(*) into n from storage.objects where bucket_id = 'videos' and name like a1 || '/%';
   assert n = 0, 'чужой тренер видит видео';
 
-  -- Атлет не может стать «тренером самому себе»; тренер — может (режим «смотреть как атлет»)
+  -- Доступ по оплате: срок ставит только тренер; истёк — атлет не читает и не пишет тренировки
+  perform set_config('role', 'authenticated', true);
   perform set_config('request.jwt.claims', json_build_object('sub', a1, 'role', 'authenticated')::text, true);
-  perform public.coach_self_link();
+  update public.coach_athletes set access_until = current_date + 365 where athlete_id = a1;
+  get diagnostics n = row_count;
+  assert n = 0, 'атлет сам поставил себе срок';
+  assert public.has_access(a1), 'без срока доступ должен быть';
   perform set_config('request.jwt.claims', json_build_object('sub', coach1, 'role', 'authenticated')::text, true);
-  perform public.coach_self_link();
+  update public.coach_athletes set access_until = public.local_today(a1) - 1 where athlete_id = a1;
+  get diagnostics n = row_count;
+  assert n = 1, 'тренер не смог поставить срок';
+  perform set_config('request.jwt.claims', json_build_object('sub', a1, 'role', 'authenticated')::text, true);
+  assert (public.my_access() ->> 'until')::date = public.local_today(a1) - 1, 'атлет не видит свой срок';
+  select count(*) into n from public.workouts where athlete_id = a1;
+  assert n = 0, 'атлет с истёкшим сроком видит тренировки';
+  select count(*) into n from public.workout_items;
+  assert n = 0, 'атлет с истёкшим сроком видит задания';
+  select count(*) into n from public.comments;
+  assert n = 0, 'атлет с истёкшим сроком видит комментарии';
+  begin
+    insert into public.set_results (item_id, set_no, weight) values (it, 9, 1);
+    assert false, 'атлет с истёкшим сроком записал подход';
+  exception when insufficient_privilege then null;
+  end;
+  begin
+    insert into public.workouts (athlete_id, date, self, published) values (a1, current_date, true, true);
+    assert false, 'атлет с истёкшим сроком создал свою тренировку';
+  exception when insufficient_privilege then null;
+  end;
+  begin
+    insert into public.comments (workout_id, text) values (w_pub, 'после срока');
+    assert false, 'атлет с истёкшим сроком написал комментарий';
+  exception when insufficient_privilege then null;
+  end;
+  perform set_config('request.jwt.claims', json_build_object('sub', coach1, 'role', 'authenticated')::text, true);
+  select count(*) into n from public.workouts where athlete_id = a1;
+  assert n > 0, 'тренер не видит тренировки атлета с истёкшим сроком';
+  perform public.save_workout(json_build_object('athlete_id', a1, 'date', current_date + 3, 'title', 'вперёд', 'published', true)::jsonb,
+    json_build_array(json_build_object('id', gen_random_uuid(), 'position', 0, 'name', 'Присед', 'result_type', 'weight_reps', 'planned_sets', 1))::jsonb);
+  -- напоминания: за 7 дней и в последний день, в 20:00 по времени атлета; за 5 дней — нет
   perform set_config('role', 'none', true);
-  select count(*) into n from public.coach_athletes where coach_id = a1;
-  assert n = 0, 'атлет привязал себя как тренер';
-  select count(*) into n from public.coach_athletes where coach_id = coach1 and athlete_id = coach1;
-  assert n = 1, 'тренер не стал атлетом у себя';
+  update public.profiles set telegram_id = 990000777, timezone = 'Europe/Moscow' where id = a1;
+  d := (now() at time zone 'Europe/Moscow')::date;
+  at20 := (d + time '20:00') at time zone 'Europe/Moscow';
+  foreach n in array array[7, 5, 0] loop
+    update public.coach_athletes set access_until = d + n where athlete_id = a1;
+    perform public.enqueue_access_reminders(at20);
+    perform public.enqueue_access_reminders(at20 - interval '3 hours');  -- не 20:00 — ничего
+  end loop;
+  select count(*) into n from public.notifications where user_id = a1 and dedup like 'access:%';
+  assert n = 2, 'напоминаний об оплате должно быть 2 (за 7 дней и в последний), есть: ' || n;
+  update public.coach_athletes set access_until = null where athlete_id = a1;
+
+  -- Удаление: атлет — только свои тренировки и задания «сам», тренер — только свои тренировки
+  perform set_config('role', 'authenticated', true);
+  perform set_config('request.jwt.claims', json_build_object('sub', a1, 'role', 'authenticated')::text, true);
+  delete from public.workouts where id = w_pub;
+  get diagnostics n = row_count;
+  assert n = 0, 'атлет удалил тренировку тренера';
+  delete from public.workout_items where workout_id = w_pub and not self;
+  get diagnostics n = row_count;
+  assert n = 0, 'атлет удалил задание тренера';
+  perform set_config('request.jwt.claims', json_build_object('sub', coach1, 'role', 'authenticated')::text, true);
+  delete from public.workouts where id = w_self;
+  get diagnostics n = row_count;
+  assert n = 0, 'тренер удалил свою тренировку атлета';
+  perform set_config('request.jwt.claims', json_build_object('sub', a1, 'role', 'authenticated')::text, true);
+  delete from public.workouts where id = w_self;
+  get diagnostics n = row_count;
+  assert n = 1, 'атлет не смог удалить свою тренировку';
+  perform set_config('request.jwt.claims', json_build_object('sub', coach1, 'role', 'authenticated')::text, true);
+  delete from public.workouts where id = w_pub;
+  get diagnostics n = row_count;
+  assert n = 1, 'тренер не смог удалить свою тренировку';
+  perform set_config('role', 'none', true);
+  select count(*) into n from public.set_results where item_id = it;
+  assert n = 0, 'подходы удалённой тренировки остались';
+
+  -- Связь «сам себе атлет» запрещена
+  perform set_config('role', 'none', true);
+  begin
+    insert into public.coach_athletes (coach_id, athlete_id) values (coach1, coach1);
+    assert false, 'тренер стал атлетом у себя';
+  exception when check_violation then null;
+  end;
 
   -- Без входа ничего не видно
   perform set_config('role', 'anon', true);
