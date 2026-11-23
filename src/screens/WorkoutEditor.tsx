@@ -221,7 +221,7 @@ function ItemRow({ item, label, groupStart, inGroup, hasNext, onChange, onMenu }
         <button type="button" onClick={() => wrap('*')}><i>К</i></button>
         <button type="button" onClick={list}>• список</button>
       </div>
-      <textarea ref={plan} rows={complex ? 3 : 2} placeholder={complex ? 'Что делать: 10 подтягиваний, 15 приседов, 200 м бег' : 'Текст плана'} value={item.plan_text} onChange={(e) => onChange({ plan_text: e.target.value })} />
+      <textarea ref={plan} className="plan-text" rows={6} placeholder={complex ? 'Что делать: 10 подтягиваний, 15 приседов, 200 м бег' : 'Текст плана'} value={item.plan_text} onChange={(e) => onChange({ plan_text: e.target.value })} />
       <div className="row timer-row">
         <select value={item.timer?.kind ?? ''} aria-label="Таймер комплекса" onChange={(e) => {
           const kind = e.target.value as TimerCfg['kind'] | ''

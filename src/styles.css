@@ -127,6 +127,8 @@ main:has(.week) { max-width: 1200px; }
 .item-head { display: flex; align-items: center; gap: 8px; }
 .item-label { min-width: 28px; }
 .item-name { flex: 1; font-weight: 700; }
+/* текст задания: сразу на 6 строк и растёт вместе с текстом, без прокрутки внутри поля */
+.plan-text { min-height: 9em; field-sizing: content; resize: vertical; }
 .handle { touch-action: none; cursor: grab; min-width: 36px; min-height: 44px; border: 0; background: none; color: var(--muted); font-size: 1.1rem; }
 .block-note { font-weight: 600; }
 .format-bar { display: flex; gap: 4px; }
