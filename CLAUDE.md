@@ -74,7 +74,7 @@ npm run build                # проверка типов + сборка в dis
 
 ## Как выкладывать
 
-- Сайт: push в `main` или `task-trekker-*` → GitHub Actions собирает и выкладывает на GitHub Pages. После смены Variables нужен новый коммит: повторная выкладка того же коммита сайт не обновляет.
+- Сайт: запросы на слияние в `main` запускают тесты и сборку. GitHub Pages публикуется из `main` после успешных проверок. Если меняется база, применить совместимую миграцию перед выкладкой интерфейса.
 - База: `npx supabase login` (один раз), `npx supabase link --project-ref <ref>`, затем `npx supabase db push --remote --yes` (новые миграции; `--include-seed` — при первой загрузке упражнений). В PowerShell на этом компьютере `npx` запрещён настройками Windows — писать `npx.cmd`.
 - Функция: `npx supabase functions deploy telegram --no-verify-jwt --use-api --yes`. После смены токена бота — привязать webhook: POST на функцию `{"action":"setup","secret":"<TELEGRAM_WEBHOOK_SECRET>"}`.
 - Проверка правил доступа: `npx supabase db query --remote --yes -f scripts/check-rls.sql`. Успех — ошибка с текстом `RLS_OK`, тестовые данные откатываются. Новые таблицы с доступом — дописывать туда.

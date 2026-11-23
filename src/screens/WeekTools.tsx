@@ -7,6 +7,30 @@ import { loadMyAthletes } from './Plan'
 type Athlete = { id: string; name: string }
 type Group = { id: string; name: string; members: string[] }
 type Conflict = 'add' | 'replace' | 'skip'
+const REASONS = {
+  occupied: 'день занят',
+  target_history: 'в этом дне есть тренировка с результатами или комментариями',
+  same_day: 'та же неделя и тот же атлет',
+  source_history: 'исходная тренировка с историей осталась на месте',
+  source_kept: 'исходная тренировка осталась на месте, так как перенеслась не всем',
+}
+type Report = {
+  placed: number
+  moved: number
+  issues: { athlete_id: string; date: string; reason: keyof typeof REASONS }[]
+}
+
+function OperationReport({ report, athletes, onDone }: { report: Report; athletes: Athlete[]; onDone: () => void }) {
+  return (
+    <div className="card dialog">
+      <b>Добавлено в планы — {report.placed}. Перенесено исходных тренировок — {report.moved}.</b>
+      {report.issues.length > 0 && <ul>{report.issues.map((issue, i) => (
+        <li key={i}>{athletes.find((a) => a.id === issue.athlete_id)?.name ?? 'Атлет'} · {fmtShort(issue.date)} · {REASONS[issue.reason]}</li>
+      ))}</ul>}
+      <button className="btn" onClick={onDone}>Готово</button>
+    </div>
+  )
+}
 
 export async function loadGroups(): Promise<Group[]> {
   const { data } = await supabase.from('athlete_groups').select('id, name, group_members(athlete_id)').order('name')
@@ -55,14 +79,18 @@ export function CopyWeek({ athlete, monday, athletes, onDone }: { athlete: Athle
   const [week, setWeek] = useState(addDays(monday, 7))
   const [conflict, setConflict] = useState<Conflict>('add')
   const [move, setMove] = useState(false)
+  const [report, setReport] = useState<Report | null>(null)
+  const [busy, setBusy] = useState(false)
   const run = async () => {
-    const { data, error } = await supabase.rpc('copy_week', {
+    setBusy(true)
+    const { data, error } = await supabase.rpc('copy_week_report', {
       p_from_athlete: athlete.id, p_from_monday: monday, p_athletes: to, p_to_monday: mondayOf(week), p_conflict: conflict, p_move: move,
     })
+    setBusy(false)
     if (error) return alert('Не получилось: ' + error.message)
-    alert(`Готово: тренировок положено — ${data}`)
-    onDone()
+    setReport(data as Report)
   }
+  if (report) return <OperationReport report={report} athletes={athletes} onDone={onDone} />
   return (
     <div className="card dialog">
       <b>{move ? 'Перенести' : 'Скопировать'} неделю {fmtShort(monday)} — {fmtShort(addDays(monday, 6))}</b>
@@ -70,8 +98,8 @@ export function CopyWeek({ athlete, monday, athletes, onDone }: { athlete: Athle
       <label>На неделю, начиная с<input type="date" value={week} onChange={(e) => setWeek(e.target.value)} /></label>
       <ConflictPick value={conflict} onChange={setConflict} />
       <label className="switch"><input type="checkbox" checked={move} onChange={(e) => setMove(e.target.checked)} /><span>Перенести (убрать с этой недели)</span></label>
-      <button className="btn" disabled={!to.length} onClick={run}>{move ? 'Перенести' : 'Скопировать'}</button>
-      <button className="btn secondary" onClick={onDone}>Отмена</button>
+      <button className="btn" disabled={busy || !to.length || !week} onClick={run}>{busy ? 'Выполняю…' : move ? 'Перенести' : 'Скопировать'}</button>
+      <button className="btn secondary" disabled={busy} onClick={onDone}>Отмена</button>
     </div>
   )
 }
@@ -89,12 +117,16 @@ export function AssignProgram({ athlete, monday, athletes, onDone }: { athlete: 
       setProgram(data?.[0]?.id ?? '')
     })
   }, [])
+  const [report, setReport] = useState<Report | null>(null)
+  const [busy, setBusy] = useState(false)
   const run = async () => {
-    const { data, error } = await supabase.rpc('assign_program', { p_program: program, p_athletes: to, p_start: mondayOf(start), p_conflict: conflict })
+    setBusy(true)
+    const { data, error } = await supabase.rpc('assign_program_report', { p_program: program, p_athletes: to, p_start: mondayOf(start), p_conflict: conflict })
+    setBusy(false)
     if (error) return alert('Не получилось: ' + error.message)
-    alert(`Готово: тренировок положено — ${data}`)
-    onDone()
+    setReport(data as Report)
   }
+  if (report) return <OperationReport report={report} athletes={athletes} onDone={onDone} />
   return (
     <div className="card dialog">
       <b>Назначить программу</b>
@@ -107,10 +139,10 @@ export function AssignProgram({ athlete, monday, athletes, onDone }: { athlete: 
           <Targets athletes={athletes} value={to} onChange={setTo} />
           <label>С понедельника<input type="date" value={start} onChange={(e) => setStart(e.target.value)} /></label>
           <ConflictPick value={conflict} onChange={setConflict} />
-          <button className="btn" disabled={!to.length || !program} onClick={run}>Назначить</button>
+          <button className="btn" disabled={busy || !to.length || !program || !start} onClick={run}>{busy ? 'Назначаю…' : 'Назначить'}</button>
         </>
       )}
-      <button className="btn secondary" onClick={onDone}>Отмена</button>
+      <button className="btn secondary" disabled={busy} onClick={onDone}>Отмена</button>
     </div>
   )
 }
@@ -124,7 +156,7 @@ export function PickWorkout({ athleteId, monday, onPick, onCancel }: {
   const [mon, setMon] = useState(addDays(monday, -7))
   const [list, setList] = useState<Workout[] | null>(null)
   const [sel, setSel] = useState<Workout | null>(null)
-  useEffect(() => { loadMyAthletes().then(setAthletes) }, [])
+  useEffect(() => { loadMyAthletes().then(setAthletes, () => {}) }, [])
   useEffect(() => {
     setList(null)
     setSel(null)

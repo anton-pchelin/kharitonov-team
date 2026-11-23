@@ -20,6 +20,11 @@ const fetchWithTimeout: typeof fetch = (input, init) => {
 
 export const supabase = createClient(url, key, { global: { fetch: fetchWithTimeout } })
 
+export async function sendCoachComment(workout_id: string, item_id: string | null, text: string, id: string) {
+  const { error } = await supabase.from('comments').upsert({ id, workout_id, item_id, text }, { ignoreDuplicates: true })
+  if (error) throw error
+}
+
 /** id вошедшего (из сохранённой сессии, без запроса к серверу). */
 export const myId = async () => (await supabase.auth.getSession()).data.session?.user.id ?? ''
 

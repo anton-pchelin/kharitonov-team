@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode } from 'react'
 import { supabase, type Profile } from '../supabase'
 import { PALETTES, saveLocalTheme, type ThemeMode } from '../theme'
 import { InstallHint } from './InstallHint'
+import { buildVersion, DiagnosticButton } from '../lib/diagnostics'
 import { Icon, type IconName } from '../lib/icons'
 import { readTimerSettings, saveTimerSettings, type TimerSettings } from '../lib/timer'
 
@@ -97,7 +98,7 @@ export function Settings({ profile, onChange, onSwitchView }: {
     ...(!isCoach ? [['gym', 'Гриф и блины', 'dumbbell', <GymSettings key="gym" profile={profile} onChange={onChange} />] as Section] : []),
     ...(!isCoach ? [['timer', 'Таймер', 'timer', <TimerSection key="timer" />] as Section] : []),
     ...(isCoach ? [['storage', 'Хранилище', 'disk', <StorageUsage key="storage" />] as Section] : []),
-    ['app', 'Приложение', 'app', <div className="group" key="app"><div className="set-line"><InstallHint /></div></div>],
+    ['app', 'Приложение', 'app', <div className="group" key="app"><div className="set-line"><InstallHint /></div><Row label="Сведения о приложении" hint={'Версия ' + buildVersion}><DiagnosticButton /></Row></div>],
   ]
   const [active, setActive] = useState(sections[0][0])
 

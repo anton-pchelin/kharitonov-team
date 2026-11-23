@@ -1,4 +1,5 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { DiagnosticButton, recordFailure } from '../lib/diagnostics'
 import { supabase } from '../supabase'
 import { Markup } from '../lib/markup'
 import { Video } from '../lib/video'
@@ -22,7 +23,7 @@ export type ViewProps = {
   onMax?: (item: WorkoutItem, weight: number) => void
   onSet?: (r: SetResult) => void
   onUnset?: (itemId: string, setNo: number) => void
-  onComment?: (itemId: string | null, text: string) => void
+  onComment?: (itemId: string | null, text: string, id: string) => void | Promise<void>
   onVideo?: (itemId: string, text: string, file: File) => Promise<void>  // атлет прикладывает видео подхода
   extra?: (item: WorkoutItem) => ReactNode  // доп. кнопки задания (видео, таймер — следующие этапы)
   onDelete?: (item: WorkoutItem | null) => void  // атлет удаляет своё: задание «сам» или (null) свою тренировку
@@ -193,6 +194,9 @@ function Comments(p: ViewProps & { itemId: string | null; list: Comment[] }) {
   const [text, setText] = useState('')
   const [open, setOpen] = useState(false)
   const [busy, setBusy] = useState('')
+  const [sending, setSending] = useState(false)
+  const [failed, setFailed] = useState(false)
+  const pendingId = useRef<string | null>(null)
   const canWrite = !!p.onComment
   if (!p.list.length && !canWrite) return null
   return (
@@ -207,18 +211,31 @@ function Comments(p: ViewProps & { itemId: string | null; list: Comment[] }) {
       ))}
       {canWrite && !open && <button className="link-btn" onClick={() => setOpen(true)}>💬 {p.itemId ? 'Комментарий' : 'Комментарий к тренировке'}</button>}
       {canWrite && open && (
-        <form className="comment-form" onSubmit={(e) => {
+        <form className="comment-form" onSubmit={async (e) => {
           e.preventDefault()
-          if (!text.trim()) return
-          p.onComment!(p.itemId, text.trim())
-          setText('')
-          setOpen(false)
+          if (!text.trim() || sending || busy) return
+          const id = pendingId.current ?? crypto.randomUUID()
+          pendingId.current = id
+          setSending(true)
+          try {
+            await p.onComment!(p.itemId, text.trim(), id)
+            pendingId.current = null
+            setFailed(false)
+            setText('')
+            setOpen(false)
+          } catch (cause) {
+            recordFailure(p.editable ? 'Тренировки' : location.hash.startsWith('#/plan') ? 'План' : 'Лента', 'Отправка комментария', cause)
+            setFailed(true)
+          } finally {
+            setSending(false)
+          }
         }}>
-          <textarea rows={2} value={text} autoFocus onChange={(e) => setText(e.target.value)} placeholder="Например: резина синяя" />
-          <button className="btn small">Отправить</button>
+          <textarea rows={2} value={text} autoFocus readOnly={sending || failed} onChange={(e) => setText(e.target.value)} placeholder="Например: резина синяя" />
+          <button className="btn small" disabled={sending || !!busy || !text.trim()}>{sending ? 'Отправляю…' : failed ? 'Повторить' : 'Отправить'}</button>
+          {failed && <><p className="error" role="alert">Не удалось отправить комментарий.</p><DiagnosticButton /></>}
           {p.onVideo && p.itemId && (
             <label className="btn small secondary">{busy || '🎬 Прикрепить видео'}
-              <input type="file" accept="video/*" hidden disabled={!!busy} onChange={async (e) => {
+              <input type="file" accept="video/*" hidden disabled={!!busy || sending} onChange={async (e) => {
                 const f = e.target.files?.[0]
                 if (!f) return
                 setBusy('Готовлю видео…')

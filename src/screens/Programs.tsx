@@ -1,18 +1,20 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { supabase } from '../supabase'
 import type { Exercise } from '../search'
 import { loadExercises } from './Exercises'
 import { WorkoutEditor, type Draft, snapshot } from './WorkoutEditor'
 import { DAY_SHORT } from '../lib/dates'
 import type { WorkoutItem } from '../lib/workout'
+import { withDeadline } from '../lib/request'
+import { LoadError } from '../lib/diagnostics'
 
 type Program = { id: string; name: string; weeks: number }
 type PW = { id: string; week: number; day: number; title: string; prescription: string; items: WorkoutItem[] }
 type Template = { id: string; title: string; items: WorkoutItem[] }
 
 /** «Шаблоны и программы» тренера: список программ, конструктор программы N недель × 7 дней, шаблоны тренировок. */
-export function Programs({ id }: { id?: string }) {
-  if (id) return <ProgramEditor id={id} />
+export function Programs({ id, coachId }: { id?: string; coachId: string }) {
+  if (id) return <ProgramEditor key={id} id={id} coachId={coachId} />
   return <ProgramList />
 }
 
@@ -69,21 +71,41 @@ function ProgramList() {
   )
 }
 
-function ProgramEditor({ id }: { id: string }) {
+function ProgramEditor({ id, coachId }: { id: string; coachId: string }) {
   const [program, setProgram] = useState<Program | null>(null)
   const [days, setDays] = useState<PW[]>([])
   const [exercises, setExercises] = useState<Exercise[]>([])
   const [editing, setEditing] = useState<{ week: number; day: number; pw: PW | null } | null>(null)
-  const load = () => {
-    supabase.from('programs').select('*').eq('id', id).single().then(({ data }) => setProgram(data))
-    supabase.from('program_workouts').select('*').eq('program_id', id).order('created_at').then(({ data }) => setDays((data ?? []) as PW[]))
-  }
-  useEffect(() => { load(); loadExercises().then(setExercises, () => {}) }, [id])
+  const [failure, setFailure] = useState<{ cause: unknown } | null>(null)
+  const request = useRef(0)
+  const load = useCallback(async () => {
+    const version = ++request.current
+    setFailure(null)
+    try {
+      const [p, d] = await withDeadline((signal) => Promise.all([
+        supabase.from('programs').select('*').eq('id', id).abortSignal(signal).single(),
+        supabase.from('program_workouts').select('*').eq('program_id', id).order('created_at').abortSignal(signal),
+      ]))
+      if (version !== request.current) return
+      if (p.error || d.error) throw p.error ?? d.error
+      setProgram(p.data)
+      setDays(d.data as PW[])
+    } catch (cause) {
+      if (version === request.current) setFailure({ cause })
+    }
+  }, [id])
+  useEffect(() => {
+    load()
+    loadExercises().then(setExercises, () => {})
+    return () => { request.current++ }
+  }, [load])
+  if (failure) return <><a href="#/programs" className="back">← Программы</a>
+    <LoadError screen="Программа" cause={failure.cause} message="Не удалось загрузить программу" onRetry={load} /></>
   if (!program) return <p className="muted">Загрузка…</p>
 
-  const save = (week: number, day: number, pw: PW | null) => async (d: Draft) => {
-    const row = { program_id: id, week, day, title: d.title, prescription: d.prescription, items: snapshot(d.items) }
-    const { error } = pw ? await supabase.from('program_workouts').update(row).eq('id', pw.id) : await supabase.from('program_workouts').insert(row)
+  const save = (week: number, day: number) => async (d: Draft, workoutId: string) => {
+    const row = { id: workoutId, program_id: id, week, day, title: d.title, prescription: d.prescription, items: snapshot(d.items) }
+    const { error } = await supabase.from('program_workouts').upsert(row)
     return error?.message ?? null
   }
   const setWeeks = async (weeks: number) => {
@@ -138,7 +160,8 @@ function ProgramEditor({ id }: { id: string }) {
         <WorkoutEditor key={`${editing.week}-${editing.day}-${editing.pw?.id ?? 'new'}`}
           heading={`${program.name}: неделя ${editing.week}, ${DAY_SHORT[editing.day]}`}
           workout={null} template={editing.pw ?? undefined} exercises={exercises}
-          save={save(editing.week, editing.day, editing.pw)}
+          draftScope={[coachId, 'program', id, editing.week, editing.day, editing.pw?.id ?? 'new']}
+          existingId={editing.pw?.id} save={save(editing.week, editing.day)}
           onClose={() => setEditing(null)} onSaved={() => { setEditing(null); load() }} />
       )}
     </>

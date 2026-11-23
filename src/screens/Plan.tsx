@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState, type ReactNode } from 'react'
-import { myId, supabase } from '../supabase'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import { myId, sendCoachComment, supabase } from '../supabase'
 import type { Exercise } from '../search'
 import { loadExercises } from './Exercises'
 import { WorkoutEditor, snapshot } from './WorkoutEditor'
@@ -10,11 +10,15 @@ import { addDays, dayShort, fmtShort, mondayOf, today, weekDays } from '../lib/d
 import type { Workout } from '../lib/workout'
 import { loadCardioHistory, type Comment, type PastSet, type SetResult } from '../lib/offline'
 import { WorkoutView, progress } from './WorkoutView'
+import { LoadError } from '../lib/diagnostics'
+import { withDeadline } from '../lib/request'
 
 type Athlete = { id: string; name: string }
 
-export async function loadMyAthletes(): Promise<Athlete[]> {
-  const { data } = await supabase.from('coach_athletes').select('athlete_id, profiles!coach_athletes_athlete_id_fkey(name)').eq('coach_id', await myId())
+export async function loadMyAthletes(id?: string, signal?: AbortSignal): Promise<Athlete[]> {
+  const query = supabase.from('coach_athletes').select('athlete_id, profiles!coach_athletes_athlete_id_fkey(name)').eq('coach_id', id ?? await myId())
+  const { data, error } = await (signal ? query.abortSignal(signal) : query)
+  if (error) throw error
   return ((data ?? []) as unknown as { athlete_id: string; profiles: { name: string } | null }[])
     .map((r) => ({ id: r.athlete_id, name: r.profiles?.name || 'Без имени' }))
     .sort((a, b) => a.name.localeCompare(b.name, 'ru'))
@@ -24,70 +28,21 @@ export async function loadMyAthletes(): Promise<Athlete[]> {
 export function Plan({ athleteId, week, open, me }: { athleteId?: string; week?: string; open?: string; me: { id: string; name: string } }) {
   const [athletes, setAthletes] = useState<Athlete[] | null>(null)
   const [exercises, setExercises] = useState<Exercise[]>([])
-  const [workouts, setWorkouts] = useState<Workout[]>([])
-  const [editing, setEditing] = useState<{ date: string; workout: Workout | null; template?: Template } | null>(null)
-  const [adding, setAdding] = useState<string | null>(null)  // день, где открыт выбор «пустая / из шаблона / из другого дня»
-  const [picking, setPicking] = useState<string | null>(null)  // день, куда берём тренировку из другого дня
-  const [tool, setTool] = useState<'copy' | 'assign' | null>(null)
-  const [templates, setTemplates] = useState<Template[]>([])
-  const [viewing, setViewing] = useState<string | null>(open ?? null)
-  const [results, setResults] = useState<SetResult[]>([])
-  const [history, setHistory] = useState<PastSet[]>([])  // прошлые кардио — для «▲ 4% к среднему»
-  const [comments, setComments] = useState<Comment[]>([])
+  const [failure, setFailure] = useState<{ cause: unknown } | null>(null)
   const monday = mondayOf(week ?? today())
+  const athlete = athletes?.find((a) => a.id === athleteId) ?? athletes?.[0]
+  const go = (id: string, mon: string) => { location.hash = '#/plan/' + id + '/' + mon }
+  const load = useCallback(async () => {
+    setFailure(null)
+    try { setAthletes(await withDeadline((signal) => loadMyAthletes(me.id, signal))) } catch (cause) { setFailure({ cause }) }
+  }, [me.id])
 
   useEffect(() => {
-    loadMyAthletes().then(setAthletes)
+    load()
     loadExercises().then(setExercises, () => setExercises([]))
-    loadTemplates()
-  }, [])
-  const loadTemplates = () => supabase.from('workout_templates').select('*').order('title').then(({ data }) => setTemplates((data ?? []) as Template[]))
+  }, [load])
 
-  // перетаскивание карточки тренировки на другой день
-  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }))
-  const onDragEnd = async ({ active, over }: DragEndEvent) => {
-    const w = workouts.find((x) => x.id === active.id)
-    if (!w || !over || over.id === w.date) return
-    setWorkouts((l) => l.map((x) => (x.id === w.id ? { ...x, date: String(over.id) } : x)))
-    const { error } = await supabase.from('workouts').update({ date: over.id }).eq('id', w.id)
-    if (error) alert('Не перенеслось: ' + error.message)
-    reload()
-  }
-
-  const athlete = athletes?.find((a) => a.id === athleteId) ?? athletes?.[0]
-  const go = (id: string, mon: string) => { location.hash = `#/plan/${id}/${mon}` }
-
-  const reload = useCallback(async () => {
-    if (!athlete) return
-    const { data, error } = await supabase.from('workouts').select('*, workout_items(*)')
-      .eq('athlete_id', athlete.id).gte('date', monday).lte('date', addDays(monday, 6)).order('created_at')
-    if (error) alert('Не загрузилось: ' + error.message)
-    const ws = (data ?? []) as Workout[]
-    const itemIds = ws.flatMap((w) => (w.workout_items ?? []).map((i) => i.id))
-    const [r, c, h] = await Promise.all([
-      itemIds.length ? supabase.from('set_results').select('*').in('item_id', itemIds) : { data: [] },
-      ws.length ? supabase.from('comments').select('*').in('workout_id', ws.map((w) => w.id)).order('created_at') : { data: [] },
-      loadCardioHistory([athlete.id]),
-    ])
-    setHistory(h)
-    setResults((r.data ?? []) as SetResult[])
-    setComments((c.data ?? []) as Comment[])
-    setWorkouts(ws)
-  }, [athlete?.id, monday])
-
-  useEffect(() => { reload() }, [reload])
-  useEffect(() => { setEditing(null); setViewing(open ?? null); setTool(null); setPicking(null) }, [athlete?.id, monday, open])
-
-  // «Из другого дня»: копия черновиком в выбранный день, сразу в редактор
-  const take = async (src: Workout, date: string) => {
-    setPicking(null)
-    const { data: id, error } = await supabase.rpc('copy_workout', { src: src.id, to_athlete: athlete!.id, to_date: date })
-    if (error) return alert('Не получилось: ' + error.message)
-    const { data } = await supabase.from('workouts').update({ published: false }).eq('id', id).select('*, workout_items(*)').single()
-    await reload()
-    if (data) setEditing({ date, workout: data as Workout })
-  }
-
+  if (failure) return <LoadError screen="План" cause={failure.cause} message="Не удалось загрузить атлетов" onRetry={load} />
   if (athletes === null) return <p className="muted">Загрузка…</p>
   if (!athlete) return <p className="muted">Пока нет атлетов. Пригласите кого-нибудь во вкладке «Атлеты».</p>
 
@@ -103,6 +58,91 @@ export function Plan({ athleteId, week, open, me }: { athleteId?: string; week?:
           <button className="btn small secondary" onClick={() => go(athlete.id, addDays(monday, 7))} aria-label="Следующая неделя">→</button>
         </div>
       </div>
+      <PlanWeek key={athlete.id + '/' + monday} athlete={athlete} athletes={athletes} monday={monday}
+        open={open} me={me} exercises={exercises} />
+    </>
+  )
+}
+
+function PlanWeek({ athlete, athletes, monday, open, me, exercises }: {
+  athlete: Athlete; athletes: Athlete[]; monday: string; open?: string; me: { id: string; name: string }; exercises: Exercise[]
+}) {
+  const [workouts, setWorkouts] = useState<Workout[] | null>(null)
+  const [editing, setEditing] = useState<{ date: string; workout: Workout | null; template?: Template } | null>(null)
+  const [adding, setAdding] = useState<string | null>(null)
+  const [picking, setPicking] = useState<string | null>(null)
+  const [tool, setTool] = useState<'copy' | 'assign' | null>(null)
+  const [templates, setTemplates] = useState<Template[]>([])
+  const [viewing, setViewing] = useState<string | null>(open ?? null)
+  const [results, setResults] = useState<SetResult[]>([])
+  const [history, setHistory] = useState<PastSet[]>([])
+  const [comments, setComments] = useState<Comment[]>([])
+  const [failure, setFailure] = useState<{ cause: unknown } | null>(null)
+  const request = useRef(0)
+
+  const loadTemplates = () => supabase.from('workout_templates').select('*').order('title').then(({ data }) => setTemplates((data ?? []) as Template[]))
+  useEffect(() => { loadTemplates() }, [])
+
+  // перетаскивание карточки тренировки на другой день
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }))
+  const onDragEnd = async ({ active, over }: DragEndEvent) => {
+    const w = workouts?.find((x) => x.id === active.id)
+    if (!w || !over || over.id === w.date) return
+    setWorkouts((l) => l?.map((x) => (x.id === w.id ? { ...x, date: String(over.id) } : x)) ?? null)
+    const { error } = await supabase.from('workouts').update({ date: over.id }).eq('id', w.id)
+    if (error) alert('Не перенеслось: ' + error.message)
+    reload()
+  }
+
+  const reload = useCallback(async () => {
+    const version = ++request.current
+    setFailure(null)
+    try {
+      const { ws, r, c } = await withDeadline(async (signal) => {
+        const { data, error } = await supabase.from('workouts').select('*, workout_items(*)')
+          .eq('athlete_id', athlete.id).gte('date', monday).lte('date', addDays(monday, 6)).order('created_at').abortSignal(signal)
+        if (error) throw error
+        const ws = data as Workout[]
+        const itemIds = ws.flatMap((w) => (w.workout_items ?? []).map((i) => i.id))
+        const [r, c] = await Promise.all([
+          itemIds.length ? supabase.from('set_results').select('*').in('item_id', itemIds).abortSignal(signal) : { data: [], error: null },
+          ws.length ? supabase.from('comments').select('*').in('workout_id', ws.map((w) => w.id)).order('created_at').abortSignal(signal) : { data: [], error: null },
+        ])
+        if (r.error || c.error) throw r.error ?? c.error
+        return { ws, r: r.data, c: c.data }
+      })
+      if (version !== request.current) return
+      setResults(r as SetResult[])
+      setComments(c as Comment[])
+      setWorkouts(ws)
+      if (ws.some((w) => w.workout_items?.some((i) => i.result_type === 'cardio'))) {
+        loadCardioHistory([athlete.id]).then((rows) => { if (version === request.current) setHistory(rows) }, () => {})
+      }
+    } catch (cause) { if (version === request.current) setFailure({ cause }) }
+  }, [athlete.id, monday])
+
+  useEffect(() => {
+    reload()
+    return () => { request.current++ }
+  }, [reload])
+  useEffect(() => { setViewing(open ?? null) }, [open])
+
+  // «Из другого дня»: копия черновиком в выбранный день, сразу в редактор
+  const take = async (src: Workout, date: string) => {
+    setPicking(null)
+    const { data: id, error } = await supabase.rpc('copy_workout', { src: src.id, to_athlete: athlete!.id, to_date: date })
+    if (error) return alert('Не получилось: ' + error.message)
+    const { data } = await supabase.from('workouts').update({ published: false }).eq('id', id).select('*, workout_items(*)').single()
+    await reload()
+    if (data) setEditing({ date, workout: data as Workout })
+  }
+
+  if (!workouts && failure) return <LoadError screen="План" cause={failure.cause} message="Не удалось загрузить неделю" onRetry={reload} />
+  if (!workouts) return <p className="muted">Загрузка…</p>
+
+  return (
+    <>
+      {failure && <LoadError screen="План" cause={failure.cause} message="Не удалось обновить неделю" onRetry={reload} />}
       <div className="plan-tools">
         <button className="btn small secondary" onClick={() => setTool(tool === 'copy' ? null : 'copy')}>Копировать неделю</button>
         <button className="btn small secondary" onClick={() => setTool(tool === 'assign' ? null : 'assign')}>Назначить программу</button>
@@ -154,9 +194,8 @@ export function Plan({ athleteId, week, open, me }: { athleteId?: string; week?:
           <div className="row-between"><b>Результаты — {athlete.name}</b><button className="back" onClick={() => setViewing(null)}>✕</button></div>
           <WorkoutView workout={workouts.find((w) => w.id === viewing)!} results={results} comments={comments} history={history}
             me={me.id} names={{ [me.id]: me.name, [athlete.id]: athlete.name }} editable={false}
-            onComment={async (item_id, text) => {
-              const { error } = await supabase.from('comments').insert({ workout_id: viewing, item_id, text })
-              if (error) alert('Не отправилось: ' + error.message)
+            onComment={async (itemId, text, id) => {
+              await sendCoachComment(viewing, itemId, text, id)
               reload()
             }} />
         </section>
@@ -165,6 +204,7 @@ export function Plan({ athleteId, week, open, me }: { athleteId?: string; week?:
       {editing && (
         <WorkoutEditor key={(editing.workout?.id ?? 'new') + editing.date}
           athleteId={athlete.id} athleteName={athlete.name} date={editing.date} workout={editing.workout} template={editing.template}
+          draftScope={[me.id, 'plan', athlete.id, editing.date, editing.workout?.id ?? 'new']}
           exercises={exercises} onClose={() => setEditing(null)}
           onSaved={() => { setEditing(null); reload() }} />
       )}

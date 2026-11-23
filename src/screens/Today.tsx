@@ -94,9 +94,9 @@ export function Today({ profile, date: routeDate }: { profile: Profile; date?: s
               await putBlob(id, blob)
               store.do({ t: 'video', row: { id, workout_id: w.id, item_id, author_id: profile.id, text: text || 'видео подхода', created_at: new Date().toISOString() } })
             }}
-            onComment={(item_id, text) => store.do({
+            onComment={(item_id, text, id) => store.do({
               t: 'comment',
-              row: { id: crypto.randomUUID(), workout_id: w.id, item_id, author_id: profile.id, text, created_at: new Date().toISOString() },
+              row: { id, workout_id: w.id, item_id, author_id: profile.id, text, created_at: new Date().toISOString() },
             })} />
           {editable && <AddOwnItem workout={w} exercises={exercises} onAdd={(row) => store.do({ t: 'item', row })} />}
           {editable && <Finish workout={w} results={data.results} onDone={() => store.do({ t: 'complete', id: w.id, at: new Date().toISOString() })} />}

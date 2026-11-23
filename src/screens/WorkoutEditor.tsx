@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { DndContext, PointerSensor, KeyboardSensor, closestCenter, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core'
 import { SortableContext, arrayMove, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
@@ -8,6 +8,10 @@ import { fmtDay, mondayOf } from '../lib/dates'
 import { COMPLEX_RESULTS, RESULT_TYPES, appendItems, complexName, complexRounds, isComplex, isGroupStart, itemLabels, type ResultType, type Workout, type WorkoutItem } from '../lib/workout'
 import { TIMER_KINDS, type TimerCfg } from '../lib/timer'
 import { PickWorkout } from './WeekTools'
+import { draftKey, readDraft, type Draft } from '../lib/workoutDraft'
+import { DiagnosticButton, recordFailure } from '../lib/diagnostics'
+
+export type { Draft } from '../lib/workoutDraft'
 
 type Suggestion = {
   name: string
@@ -35,32 +39,39 @@ const blank = (s: Partial<Suggestion> & { name: string }, position: number): Wor
 const norm = (s: string) => s.toLowerCase().replaceAll('ё', 'е')
 
 /** Редактор тренировки тренера. Ничего не создаётся в базе до «Сохранить». */
-export type Draft = { title: string; prescription: string; published: boolean; items: WorkoutItem[] }
+
 
 /** Снимок тренировки для шаблона или дня программы — без id, чтобы копии не путались с оригиналом. */
 export const snapshot = (items: WorkoutItem[]) =>
   items.filter((i) => !i.self).sort((a, b) => a.position - b.position)
     .map(({ id: _id, workout_id: _w, self: _s, ...rest }, position) => ({ ...rest, position }))
 
-export function WorkoutEditor({ athleteId, athleteName = '', date = '', workout, template, heading, save: saveOverride, exercises, onClose, onSaved }: {
+export function WorkoutEditor({ athleteId, athleteName = '', date = '', workout, template, heading, save: saveOverride, draftScope, existingId, exercises, onClose, onSaved }: {
   athleteId?: string
   athleteName?: string
   date?: string
   workout: Workout | null
   template?: { title: string; prescription: string; items: Partial<WorkoutItem>[] }  // «Из шаблона» / день программы
   heading?: string
-  save?: (d: Draft) => Promise<string | null>  // своё сохранение (день программы); вернуть текст ошибки или null
+  save?: (d: Draft, id: string) => Promise<string | null>
+  draftScope: readonly (string | number)[]
+  existingId?: string
   exercises: Exercise[]
   onClose: () => void
   onSaved: () => void
 }) {
-  const initial = useMemo(() => ({
+  const initial = useState(() => ({
     title: workout?.title ?? template?.title ?? '',
     prescription: workout?.prescription ?? template?.prescription ?? '',
     published: workout?.published ?? true,
     items: workout ? (workout.workout_items ?? []).filter((i) => !i.self).sort((a, b) => a.position - b.position)
       : (template?.items ?? []).map((i, position) => ({ ...blank({ name: '', ...i } as Suggestion, position), ...i, id: crypto.randomUUID() }) as WorkoutItem),
-  }), [workout, template])
+  }))[0]
+  const key = draftKey(draftScope)
+  const [stored, setStored] = useState(() => readDraft(localStorage, key))
+  const [id, setId] = useState(() => workout?.id ?? existingId ?? crypto.randomUUID())
+  const wasStored = useRef(false)
+  const [storageError, setStorageError] = useState(false)
   const [title, setTitle] = useState(initial.title)
   const [prescription, setPrescription] = useState(initial.prescription)
   const [published, setPublished] = useState(initial.published)
@@ -72,15 +83,38 @@ export function WorkoutEditor({ athleteId, athleteName = '', date = '', workout,
   useEffect(() => { box.current?.scrollIntoView({ block: 'start' }) }, [])  // на телефоне редактор ниже всей недели
   const dirty = JSON.stringify({ title, prescription, published, items }) !== JSON.stringify(initial)
 
+  useLayoutEffect(() => {
+    if (stored || (!dirty && !wasStored.current)) return
+    try {
+      localStorage.setItem(key, JSON.stringify({ id, title, prescription, published, items }))
+      wasStored.current = true
+      setStorageError(false)
+    } catch { setStorageError(true) }
+  }, [key, id, title, prescription, published, items, stored, dirty])
+
+  const deleteDraft = () => {
+    try { localStorage.removeItem(key); return true } catch { setStorageError(true); return false }
+  }
+  const restore = () => {
+    if (!stored) return
+    wasStored.current = true
+    setId(stored.id)
+    setTitle(stored.title)
+    setPrescription(stored.prescription)
+    setPublished(stored.published)
+    setItems(stored.items)
+    setStored(null)
+  }
+
   useEffect(() => {
-    if (!dirty) return
+    if (!dirty || !storageError) return
     const f = (e: BeforeUnloadEvent) => e.preventDefault()
     addEventListener('beforeunload', f)
     return () => removeEventListener('beforeunload', f)
-  }, [dirty])
+  }, [dirty, storageError])
 
   const close = () => {
-    if (!dirty || confirm('Выйти без сохранения?')) onClose()
+    if (!dirty || !storageError || confirm('Черновик не записался в телефон. Закрыть редактор?')) onClose()
   }
 
   const update = (id: string, patch: Partial<WorkoutItem>) => setItems((l) => l.map((i) => (i.id === id ? { ...i, ...patch } : i)))
@@ -120,23 +154,43 @@ export function WorkoutEditor({ athleteId, athleteName = '', date = '', workout,
     setBusy(true)
     setError('')
     const clean = items.map((i, position) => ({ ...i, position, name: i.name.trim() }))
-    const err = saveOverride
-      ? await saveOverride({ title: title.trim(), prescription, published, items: clean })
-      : (await supabase.rpc('save_workout', {
-        w: { id: workout?.id ?? null, athlete_id: athleteId, date: workout?.date ?? date, title: title.trim(), prescription, published },
-        items: clean,
-      })).error?.message ?? null
-    setBusy(false)
-    if (err) return setError('Не сохранилось: ' + err)
-    onSaved()
+    try {
+      if (saveOverride) {
+        const error = await saveOverride({ title: title.trim(), prescription, published, items: clean }, id)
+        if (error) throw new Error(error)
+      } else {
+        const { error } = await supabase.rpc('save_workout', {
+          w: { id, athlete_id: athleteId, date: workout?.date ?? date, title: title.trim(), prescription, published },
+          items: clean,
+        })
+        if (error) throw error
+      }
+      deleteDraft()
+      onSaved()
+    } catch (cause) {
+      recordFailure('Редактор тренировки', 'Сохранение', cause)
+      setError('Не сохранилось. Проверьте связь и повторите.')
+    } finally {
+      setBusy(false)
+    }
   }
+
+  if (stored) return <section ref={box} className="editor card">
+    <div className="row-between"><b>Есть черновик на этом телефоне</b><button className="back" onClick={close}>✕</button></div>
+    <div className="row">
+      <button className="btn" onClick={restore}>Восстановить</button>
+      <button className="btn secondary" onClick={() => { if (deleteDraft()) setStored(null) }}>Удалить черновик</button>
+    </div>
+    {storageError && <p className="error">Не удалось удалить черновик с телефона.</p>}
+  </section>
 
   return (
     <section ref={box} className="editor card">
       <div className="row-between">
         <b>{heading ?? `${fmtDay(workout?.date ?? date)} — ${athleteName}`}</b>
-        <button className="back" onClick={close}>✕</button>
+        <button className="back" onClick={close} disabled={busy}>✕</button>
       </div>
+      <fieldset disabled={busy} className="workout-fields">
       {!saveOverride && (
         <div className="segmented">
           <button className={!published ? 'active' : ''} onClick={() => setPublished(false)}>Черновик</button>
@@ -165,7 +219,9 @@ export function WorkoutEditor({ athleteId, athleteName = '', date = '', workout,
             onPick={(w) => { setItems((l) => appendItems(l, w.workout_items ?? [])); setPicking(false) }} onCancel={() => setPicking(false)} />
         : <button className="btn secondary" onClick={() => setPicking(true)}>Вставить из другой тренировки</button>)}
 
-      {error && <p className="error">{error}</p>}
+      </fieldset>
+      {storageError && <p className="error">Не удалось записать черновик на телефон. Сохраните тренировку перед выходом.</p>}
+      {error && <><p className="error" role="alert">{error}</p><DiagnosticButton /></>}
       <button className="btn" onClick={save} disabled={busy}>{busy ? 'Сохраняю…' : 'Сохранить'}</button>
     </section>
   )
@@ -221,7 +277,8 @@ function ItemRow({ item, label, groupStart, inGroup, hasNext, onChange, onMenu }
         <button type="button" onClick={() => wrap('*')}><i>К</i></button>
         <button type="button" onClick={list}>• список</button>
       </div>
-      <textarea ref={plan} className="plan-text" rows={6} placeholder={complex ? 'Что делать: 10 подтягиваний, 15 приседов, 200 м бег' : 'Текст плана'} value={item.plan_text} onChange={(e) => onChange({ plan_text: e.target.value })} />
+      <label>Описание задания
+      <textarea ref={plan} className="plan-text" rows={6} placeholder={complex ? 'Что делать: 10 подтягиваний, 15 приседов, 200 м бег' : 'Текст плана'} value={item.plan_text} onChange={(e) => onChange({ plan_text: e.target.value })} /></label>
       <div className="row timer-row">
         <select value={item.timer?.kind ?? ''} aria-label="Таймер комплекса" onChange={(e) => {
           const kind = e.target.value as TimerCfg['kind'] | ''
@@ -282,6 +339,10 @@ function ItemRow({ item, label, groupStart, inGroup, hasNext, onChange, onMenu }
 /** «+ Задание»: поиск сразу в истории атлета, шаблонах тренера и базе упражнений. */
 function AddItem({ athleteId, exercises, onAdd }: { athleteId?: string; exercises: Exercise[]; onAdd: (s: Suggestion) => void }) {
   const [q, setQ] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState(false)
+  const pending = useRef(new Map<string, string>())
+  const [added, setAdded] = useState<Exercise[]>([])
   const [history, setHistory] = useState<Suggestion[]>([])
   const [templates, setTemplates] = useState<Template[]>([])
 
@@ -304,23 +365,37 @@ function AddItem({ athleteId, exercises, onAdd }: { athleteId?: string; exercise
   const found = words.length ? {
     history: history.filter((h) => match(h.name)).slice(0, 5),
     templates: templates.filter((t) => match(t.name)).slice(0, 5),
-    base: searchExercises(exercises, q).slice(0, 8),
+    base: searchExercises([...added, ...exercises], q).slice(0, 8),
   } : null
 
   const pick = (s: Suggestion) => { onAdd(s); setQ('') }
   const addNew = async () => {
-    // новое упражнение сразу попадает в базу и дальше находится поиском
-    const { data, error } = await supabase.from('exercises').insert({ name: q.trim(), source: 'coach' }).select('id').single()
-    if (error) return alert('Не получилось добавить упражнение: ' + error.message)
-    exercises.push({ id: data.id, name: q.trim(), aliases: [], muscles: [], equipment: null, image_url: null, video_url: null, source: 'coach' })
-    pick({ name: q.trim(), exercise_id: data.id, plan_text: '', video_url: null, result_type: 'weight_reps', planned_sets: 3 })
+    const name = q.trim()
+    const id = pending.current.get(name) ?? crypto.randomUUID()
+    pending.current.set(name, id)
+    setBusy(true)
+    setError(false)
+    try {
+      const { error } = await supabase.from('exercises').upsert({ id, name, source: 'coach' }, { ignoreDuplicates: true })
+      if (error) throw error
+      pending.current.delete(name)
+      setAdded((previous) => [...previous, { id, name, aliases: [], muscles: [], equipment: null, image_url: null, video_url: null, source: 'coach' }])
+      pick({ name, exercise_id: id, plan_text: '', video_url: null, result_type: 'weight_reps', planned_sets: 3 })
+    } catch (cause) {
+      recordFailure('Редактор тренировки', 'Добавление упражнения', cause)
+      setError(true)
+    } finally {
+      setBusy(false)
+    }
   }
 
   return (
     <div className="add-item">
-      <input type="search" placeholder="+ Задание: поиск — присед, жим…" value={q} onChange={(e) => setQ(e.target.value)} />
+      <label>Поиск по названию упражнения
+        <input type="search" placeholder="Присед, жим…" value={q} disabled={busy} onChange={(e) => { setQ(e.target.value); setError(false) }} />
+      </label>
       {found && (
-        <div className="suggest">
+        <fieldset disabled={busy} className="suggest workout-fields">
           {found.history.length > 0 && <small className="muted">История этого атлета</small>}
           {found.history.map((h, i) => (
             <button key={'h' + i} onClick={() => pick(h)}><b>{h.name}</b> <span className="muted">{h.plan_text.split('\n')[0]}</span></button>
@@ -333,9 +408,10 @@ function AddItem({ athleteId, exercises, onAdd }: { athleteId?: string; exercise
               {e.name}
             </button>
           ))}
-          <button onClick={addNew}>+ Новое упражнение «{q.trim()}»</button>
-        </div>
+          <button onClick={addNew}>{busy ? 'Добавляю…' : '+ Новое упражнение «' + q.trim() + '»'}</button>
+        </fieldset>
       )}
+      {error && <><p className="error" role="alert">Не удалось добавить упражнение. Проверьте связь и повторите.</p><DiagnosticButton /></>}
     </div>
   )
 }
