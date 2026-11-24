@@ -27,6 +27,7 @@ export type ViewProps = {
   onVideo?: (itemId: string, text: string, file: File) => Promise<void>  // атлет прикладывает видео подхода
   extra?: (item: WorkoutItem) => ReactNode  // доп. кнопки задания (видео, таймер — следующие этапы)
   onEdit?: (item: WorkoutItem) => void
+  itemEditor?: (item: WorkoutItem) => ReactNode
   onDelete?: (item: WorkoutItem | null) => void  // атлет удаляет своё: задание «сам» или (null) свою тренировку
 }
 
@@ -108,6 +109,7 @@ function ItemView(p: ViewProps & { item: WorkoutItem; label: string; note: strin
         {p.onEdit && <button className="link-btn" onClick={() => p.onEdit!(item)} aria-label={'Редактировать «' + item.name + '»'}>Редактировать</button>}
         {p.onDelete && <button className="link-btn" onClick={() => p.onDelete!(item)} aria-label={'Удалить «' + item.name + '»'}>Удалить</button>}
       </div>}
+      {item.self && p.editable && p.itemEditor?.(item)}
       <div className="row-wrap">
         <Video url={item.video_url} />
         {p.extra?.(item)}
