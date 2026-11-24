@@ -14,6 +14,9 @@ const monday = '2026-11-23'
 const plan = '#/plan/' + a + '/' + monday
 const athleteRows = [{ athlete_id: a, profiles: { name: 'Первый атлет' } }, { athlete_id: b, profiles: { name: 'Второй атлет' } }]
 const failure = { status: 403, json: { code: '42501', message: 'Тестовая ошибка. Секретный текст.' } }
+const mockReply = (endpoint) =>
+  endpoint === 'profiles' ? { id: coach, name: 'Тренер', role: 'coach', palette: 'Сталь', theme: 'light' }
+    : endpoint === 'my_access' ? null : endpoint === 'coach_athletes' ? athleteRows : []
 const workout = (title, athlete = a) => ({
   id: 'w1', name: title, title, athlete_id: athlete, date: monday, completed_at: monday, published: true,
   self: false, prescription: '', workout_items: [], profiles: { name: 'Атлет' },
@@ -30,15 +33,30 @@ before(async () => {
   process.env.VITE_SUPABASE_ANON_KEY = 'test-key'
   process.env.VITE_BUILD_VERSION = 'browser-test'
   await build({ build: { outDir: dir }, logLevel: 'error' })
-  server = await preview({ build: { outDir: dir }, preview: { host: '127.0.0.1', port: 4178, strictPort: true }, logLevel: 'error' })
+  server = await preview({
+    build: { outDir: dir },
+    preview: { host: '127.0.0.1', port: 4178, strictPort: true },
+    logLevel: 'error',
+    plugins: [{
+      name: 'mock-api',
+      configurePreviewServer({ middlewares }) {
+        // В WebKit запросы под управлением сервис-воркера обходят page.route.
+        middlewares.use('/mock', (req, res) => {
+          const endpoint = new URL(req.url, base).pathname.replace(/^\/(rest|auth)\/v1\//, '')
+          res.setHeader('Content-Type', 'application/json')
+          res.end(JSON.stringify(mockReply(endpoint)))
+        })
+      },
+    }],
+  })
 })
 after(async () => {
   if (server) await new Promise((resolve) => server.httpServer.close(resolve))
   if (dir) await rm(dir, { recursive: true, force: true })
 })
 
-async function visit(browser, hash, respond = () => undefined, athleteView = false) {
-  const page = await browser.newPage({ viewport: { width: 390, height: 844 }, serviceWorkers: 'block' })
+async function visit(browser, hash, respond = () => undefined, athleteView = false, serviceWorkers = 'block') {
+  const page = await browser.newPage({ viewport: { width: 390, height: 844 }, serviceWorkers })
   page.setDefaultTimeout(5000)
   await page.addInitScript(({ coach, athleteView }) => {
     if (athleteView) localStorage.setItem('viewAs', 'athlete')
@@ -56,10 +74,7 @@ async function visit(browser, hash, respond = () => undefined, athleteView = fal
     const endpoint = url.pathname.replace(/^\/mock\/(rest|auth)\/v1\//, '')
     const result = await respond(endpoint, url, req)
     if (result?.abort) return route.abort().catch(() => {})
-    const json = result?.json ?? (
-      endpoint === 'profiles' ? { id: coach, name: 'Тренер', role: 'coach', palette: 'Сталь', theme: 'light' }
-        : endpoint === 'my_access' ? null : endpoint === 'coach_athletes' ? athleteRows : []
-    )
+    const json = result?.json ?? mockReply(endpoint)
     await route.fulfill({ status: result?.status ?? 200, json }).catch(() => {})
   })
   await page.goto(base + '/' + hash)
@@ -388,17 +403,25 @@ for (const [name, engine] of Object.entries({ chromium, webkit })) {
         try {
           const third = page.getByRole('button', { name: 'Перетащить «Третье»' })
           const fourth = page.getByRole('button', { name: 'Перетащить «Четвёртое»' })
-          await fourth.scrollIntoViewIfNeeded()
+          const fromCard = page.locator('.task').filter({ has: third })
+          const toCard = page.locator('.task').filter({ has: fourth })
+          await third.evaluate((node) => node.scrollIntoView({ block: 'center' }))
           const from = await third.boundingBox()
-          const target = await page.locator('.task').filter({ has: fourth }).boundingBox()
+          const source = await fromCard.boundingBox()
+          const target = await toCard.boundingBox()
           const x = from.x + from.width / 2
           const y = from.y + from.height / 2
-          const saved = page.waitForResponse((r) => r.url().endsWith('/rpc/reorder_own_workout_items'))
+          const distance = target.y + target.height / 2 - (source.y + source.height / 2)
           await page.mouse.move(x, y)
           await page.mouse.down()
-          await page.mouse.move(x, target.y + target.height / 2, { steps: 18 })
-          await page.mouse.up()
-          await saved
+          await page.mouse.move(x, y + 10)
+          await page.locator('.moving-task').waitFor()
+          await page.mouse.move(x, y + distance, { steps: 18 })
+          await page.getByText('Позиция 4', { exact: true }).waitFor({ state: 'attached' })
+          await Promise.all([
+            page.waitForResponse((r) => r.url().endsWith('/rpc/reorder_own_workout_items')),
+            page.mouse.up(),
+          ])
           assert.deepEqual(sent, { p_workout: 'w1', p_items: ['task-1', 'task-2', 'task-4', 'task-3'] })
           await page.reload()
           await third.waitFor()
@@ -491,3 +514,37 @@ for (const [name, engine] of Object.entries({ chromium, webkit })) {
     } finally { await browser.close() }
   })
 }
+
+test('установленная версия предлагает обновление и восстанавливает черновик', { timeout: 60_000 }, async () => {
+  const browsers = []
+  try {
+    const pages = []
+    for (const engine of [chromium, webkit]) {
+      const browser = await engine.launch()
+      browsers.push(browser)
+      const page = await visit(browser, plan, undefined, false, 'allow')
+      pages.push(page)
+      await openEditor(page)
+      await page.getByPlaceholder('Название тренировки').fill('Черновик перед обновлением')
+      await page.waitForFunction(() => !!navigator.serviceWorker.controller, undefined, { timeout: 15_000 })
+    }
+
+    process.env.VITE_BUILD_VERSION = 'browser-test-next'
+    await build({ build: { outDir: dir, emptyOutDir: false }, logLevel: 'error' })
+
+    for (const page of pages) {
+      await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')))
+      const update = page.getByRole('button', { name: 'Обновить приложение' })
+      await update.waitFor({ timeout: 15_000 })
+      assert.equal(await page.getByPlaceholder('Название тренировки').inputValue(), 'Черновик перед обновлением')
+      await Promise.all([page.waitForEvent('domcontentloaded'), update.click()])
+      await openEditor(page)
+      await page.getByRole('button', { name: 'Восстановить' }).click()
+      assert.equal(await page.getByPlaceholder('Название тренировки').inputValue(), 'Черновик перед обновлением')
+      await page.locator('.tabs').getByRole('link', { name: 'Настройки' }).click()
+      await page.getByText('Версия browser-test-next', { exact: true }).waitFor()
+    }
+  } finally {
+    await Promise.all(browsers.map((browser) => browser.close()))
+  }
+})

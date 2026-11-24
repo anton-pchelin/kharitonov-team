@@ -17,6 +17,7 @@ import { Icon, type IconName } from './lib/icons'
 import { daysBetween, fmtDM, today } from './lib/dates'
 import { withDeadline } from './lib/request'
 import { LoadError } from './lib/diagnostics'
+import { useAppUpdate } from './lib/appUpdate'
 
 const INVITE_KEY = 'inviteToken'
 const ACCESS_KEY = 'access'  // последний известный срок доступа — для работы без сети
@@ -53,6 +54,7 @@ export function Logo() {
 
 export function App() {
   const route = useRoute()
+  const updateAvailable = useAppUpdate()
   const [session, setSession] = useState<Session | null | undefined>(undefined)
   const [profile, setProfile] = useState<Profile | null>(null)
   const [failure, setFailure] = useState<{ cause: unknown } | null>(null)
@@ -223,6 +225,10 @@ export function App() {
         </div>
       </aside>
       <main>
+        {updateAvailable && <div className="card">
+          <p role="status">Доступна новая версия приложения.</p>
+          <button type="button" className="btn small secondary" onClick={() => location.reload()}>Обновить приложение</button>
+        </div>}
         {inviteError && <p className="error">{inviteError}</p>}
         {tab === 'today' && daysLeft !== null && daysLeft <= 7 && (
           <p className="card">Доступ до {fmtDM(access!.until!)} — {daysLeft === 0 ? 'сегодня последний день' : `осталось ${daysLeft} ${daysLeft === 1 ? 'день' : daysLeft < 5 ? 'дня' : 'дней'}`}. Не забудьте оплатить</p>
