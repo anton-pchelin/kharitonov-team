@@ -36,6 +36,7 @@ export type Op =
   | { t: 'workout'; row: Workout }
   | { t: 'item'; row: WorkoutItem & { workout_id: string } }
   | { t: 'edit_item'; id: string; workout_id: string; patch: ItemEdit }
+  | { t: 'reorder_items'; workout_id: string; item_ids: string[] }
   | { t: 'complete'; id: string; at: string }
   | { t: 'record'; row: MaxRecord & { id: string; athlete_id: string } }
   | { t: 'video'; row: Comment }  // файл лежит в IndexedDB под ключом row.id
@@ -63,6 +64,18 @@ export function applyLocal(c: Cache, op: Op): Cache {
       workouts: c.workouts.map((w) => w.id === op.workout_id
         ? { ...w, workout_items: w.workout_items?.map((item) => item.id === op.id && item.self ? { ...item, ...op.patch } : item) }
         : w),
+    }
+    case 'reorder_items': {
+      const positions = new Map(op.item_ids.map((id, i) => [id, 1000 + i]))
+      return {
+        ...c,
+        workouts: c.workouts.map((w) => w.id === op.workout_id
+          ? { ...w, workout_items: w.workout_items?.map((item) => {
+            const position = positions.get(item.id)
+            return item.self && position !== undefined ? { ...item, position } : item
+          }) }
+          : w),
+      }
     }
     case 'complete': return { ...c, workouts: c.workouts.map((w) => (w.id === op.id ? { ...w, completed_at: w.completed_at ?? op.at } : w)) }
     case 'record': return { ...c, records: [...(c.records ?? []), op.row] }
@@ -102,6 +115,7 @@ async function send(op: Op, userId: string): Promise<{ error: { code?: string; m
         .eq('workout_id', op.workout_id).eq('self', true).select('id').maybeSingle()
       return { error: error ?? (data ? null : { code: 'PGRST116', message: 'Задание уже удалено или недоступно' }) }
     }
+    case 'reorder_items': return supabase.rpc('reorder_own_workout_items', { p_workout: op.workout_id, p_items: op.item_ids })
     case 'complete': return supabase.rpc('complete_workout', { p_id: op.id, p_at: op.at })
     case 'record': return supabase.from('records').upsert(op.row, { onConflict: 'id', ignoreDuplicates: true })
     case 'delete_workout': return supabase.from('workouts').delete().eq('id', op.id).eq('self', true)

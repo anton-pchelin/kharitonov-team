@@ -1,4 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { DndContext, KeyboardSensor, PointerSensor, closestCenter, useSensor, useSensors } from '@dnd-kit/core'
+import { SortableContext, arrayMove, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
 import { DiagnosticButton, recordFailure } from '../lib/diagnostics'
 import { supabase } from '../supabase'
 import { Markup } from '../lib/markup'
@@ -27,6 +30,7 @@ export type ViewProps = {
   onVideo?: (itemId: string, text: string, file: File) => Promise<void>  // атлет прикладывает видео подхода
   extra?: (item: WorkoutItem) => ReactNode  // доп. кнопки задания (видео, таймер — следующие этапы)
   onEdit?: (item: WorkoutItem) => void
+  onReorder?: (itemIds: string[]) => void
   itemEditor?: (item: WorkoutItem) => ReactNode
   onDelete?: (item: WorkoutItem | null) => void  // атлет удаляет своё: задание «сам» или (null) свою тренировку
 }
@@ -72,13 +76,52 @@ export function WorkoutView(p: ViewProps) {
           note={it.superset != null && plan[i - 1]?.superset !== it.superset ? it.block_note : ''} />
       ))}
       {own.length > 0 && <div className="divider">моё</div>}
-      {own.map((it) => <ItemView key={it.id} {...p} item={it} label="+" note="" />)}
+      {p.editable && p.onReorder && own.length > 1
+        ? <SortableOwnItems items={own} view={p} onReorder={p.onReorder} />
+        : own.map((it, i) => <ItemView key={it.id} {...p} item={it} label={String(i + 1)} note="" />)}
       <Comments {...p} itemId={null} list={workoutComments} />
     </article>
   )
 }
 
-function ItemView(p: ViewProps & { item: WorkoutItem; label: string; note: string }) {
+function SortableOwnItems({ items, view, onReorder }: {
+  items: WorkoutItem[]; view: ViewProps; onReorder: (ids: string[]) => void
+}) {
+  const ids = items.map((item) => item.id)
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  )
+  return <DndContext sensors={sensors} collisionDetection={closestCenter}
+    accessibility={{ screenReaderInstructions: { draggable: 'Нажмите пробел, чтобы взять упражнение. Стрелки меняют позицию, пробел сохраняет, Escape отменяет.' }, announcements: {
+      onDragStart: () => 'Упражнение взято.',
+      onDragOver: ({ over }) => over ? 'Позиция ' + (ids.indexOf(String(over.id)) + 1) : undefined,
+      onDragEnd: () => 'Перетаскивание завершено.',
+      onDragCancel: () => 'Перетаскивание отменено.',
+    } }}
+    onDragEnd={({ active, over }) => {
+      const from = ids.indexOf(String(active.id))
+      const to = ids.indexOf(String(over?.id))
+      if (from >= 0 && to >= 0 && from !== to) onReorder(arrayMove(ids, from, to))
+    }}>
+    <SortableContext items={ids} strategy={verticalListSortingStrategy}>
+      {items.map((item, i) => <SortableOwnItem key={item.id} view={view} item={item} label={String(i + 1)} />)}
+    </SortableContext>
+  </DndContext>
+}
+
+function SortableOwnItem({ view, item, label }: { view: ViewProps; item: WorkoutItem; label: string }) {
+  const { attributes, listeners, setActivatorNodeRef, setNodeRef, transform, transition, isDragging } = useSortable({ id: item.id })
+  return <div ref={setNodeRef} className={isDragging ? 'moving-task' : undefined}
+    style={{ transform: CSS.Transform.toString(transform), transition }}>
+    <ItemView {...view} item={item} label={label} note="" handle={
+      <button type="button" className="handle" ref={setActivatorNodeRef} {...attributes} {...listeners}
+        aria-label={'Перетащить «' + item.name + '»'}>⋮⋮</button>
+    } />
+  </div>
+}
+
+function ItemView(p: ViewProps & { item: WorkoutItem; label: string; note: string; handle?: ReactNode }) {
   const { item } = p
   const mine = p.results.filter((r) => r.item_id === item.id)
   const prev = previousSets(p.history, item, p.workout.date)
@@ -95,6 +138,7 @@ function ItemView(p: ViewProps & { item: WorkoutItem; label: string; note: strin
     <section className={'task' + (item.superset != null ? ' superset' : '')}>
       {p.note && <div className="block-label">{p.note}</div>}
       <div className="task-head">
+        {p.handle}
         {item.result_type === 'check' ? (
           <button className={'round-check' + (mine[0]?.done ? ' on' : '')} disabled={!p.editable} aria-label="Выполнено"
             onClick={() => put(1, { done: !mine[0]?.done })}>✓</button>

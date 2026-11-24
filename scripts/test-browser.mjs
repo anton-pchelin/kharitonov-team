@@ -334,6 +334,77 @@ for (const [name, engine] of Object.entries({ chromium, webkit })) {
         } finally { await page.context().close() }
       })
 
+      await suite.test('перетаскивание переносит третье своё упражнение на четвёртое место и сохраняет порядок', async () => {
+        const date = new Date().toLocaleDateString('sv-SE')
+        const names = ['Первое', 'Второе', 'Третье', 'Четвёртое']
+        const items = ['Задание тренера', ...names].map((name, i) => ({
+          id: 'task-' + i, position: i === 0 ? 1 : 999 + i, name, self: i > 0,
+          exercise_id: null, result_type: i === 3 ? 'weight_reps' : 'check', planned_sets: 1,
+          plan_text: '', video_url: null, superset: null, block_note: '',
+        }))
+        let sent
+        const page = await visit(browser, '#/today/' + date, (endpoint, _, req) => {
+          if (endpoint === 'rpc/my_access') return { json: { coach_id: b, until: null } }
+          if (endpoint === 'workouts') return { json: [{ ...workout('Порядок упражнений', coach), date, workout_items: items }] }
+          if (endpoint === 'set_results') return { json: [{
+            item_id: 'task-3', set_no: 1, weight: 65, reps: 6, done: true,
+            workout_items: { name: 'Третье', exercise_id: null, workouts: { date } },
+          }] }
+          if (endpoint === 'rpc/reorder_own_workout_items') {
+            sent = req.postDataJSON()
+            sent.p_items.forEach((id, i) => { items.find((item) => item.id === id).position = 1000 + i })
+            return { json: null }
+          }
+        }, true)
+        try {
+          const third = page.getByRole('button', { name: 'Перетащить «Третье»' })
+          const fourth = page.getByRole('button', { name: 'Перетащить «Четвёртое»' })
+          await fourth.scrollIntoViewIfNeeded()
+          const from = await third.boundingBox()
+          const target = await page.locator('.task').filter({ has: fourth }).boundingBox()
+          const x = from.x + from.width / 2
+          const y = from.y + from.height / 2
+          const saved = page.waitForResponse((r) => r.url().endsWith('/rpc/reorder_own_workout_items'))
+          await page.mouse.move(x, y)
+          await page.mouse.down()
+          await page.mouse.move(x, target.y + target.height / 2, { steps: 18 })
+          await page.mouse.up()
+          await saved
+          assert.deepEqual(sent, { p_workout: 'w1', p_items: ['task-1', 'task-2', 'task-4', 'task-3'] })
+          await page.reload()
+          await third.waitFor()
+          assert.deepEqual(await page.locator('.task-name').allTextContents(), ['Задание тренера', 'Первое', 'Второе', 'Четвёртое', 'Третье'])
+          assert.equal(await page.locator('.task').filter({ has: third }).getByLabel('кг, подход 1').inputValue(), '65')
+        } finally { await page.context().close() }
+      })
+
+      await suite.test('точное название жима использует существующую запись каталога', async () => {
+        const date = new Date().toLocaleDateString('sv-SE')
+        const bench = { id: 'bench-press', name: 'Жим штанги лёжа', aliases: [] }
+        const variants = Array.from({ length: 7 }, (_, i) => ({ ...bench, id: 'variant-' + i, name: bench.name + ' вариант ' + i }))
+        const writes = []
+        const page = await visit(browser, '#/today/' + date, (endpoint, _, req) => {
+          if (endpoint === 'rpc/my_access') return { json: { coach_id: b, until: null } }
+          if (endpoint === 'workouts') return { json: [{ ...workout('Жим', coach), date }] }
+          if (endpoint === 'exercises') {
+            assert.equal(req.method(), 'GET')
+            return { json: [...variants, bench] }
+          }
+          if (endpoint === 'workout_items' && req.method() === 'POST') { writes.push(req.postDataJSON()); return { status: 201 } }
+        }, true)
+        try {
+          await page.getByRole('button', { name: '+ моё упражнение' }).click()
+          await page.getByRole('searchbox', { name: 'Название упражнения' }).fill('жим штанги лежа')
+          await page.getByRole('button', { name: bench.name, exact: true }).waitFor()
+          assert.equal(await page.locator('.suggest button').first().textContent(), bench.name)
+          assert.equal(await page.getByRole('button', { name: 'В базу и в тренировку' }).count(), 0)
+          const saved = page.waitForResponse((r) => r.url().includes('/workout_items') && r.request().method() === 'POST')
+          await page.getByRole('button', { name: 'Добавить', exact: true }).click()
+          await saved
+          assert.equal(writes[0].exercise_id, bench.id)
+        } finally { await page.context().close() }
+      })
+
       await suite.test('свободный таймер переключается между паузой и работой', async () => {
         const currentDate = new Date().toLocaleDateString('sv-SE')
         const page = await visit(browser, '#/today/' + currentDate, (endpoint) =>
