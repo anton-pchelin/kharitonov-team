@@ -36,6 +36,13 @@ it('АМРАП отсчитывает секунды каждого блока, 
   expect(capped.state(90_100)).toMatchObject({ phase: 'done', elapsed: 90 })
 })
 
+it('запущенный таймер узнаёт тот же интервал после чтения из базы', () => {
+  expect(createTimer({ kind: 'emom', intervalSec: 360, rounds: 5 }).signature)
+    .toBe(createTimer({ rounds: 5, kind: 'emom', intervalSec: 360, prepSec: 3 }).signature)
+  expect(createTimer({ kind: 'emom', rounds: 5 }).signature)
+    .not.toBe(createTimer({ kind: 'emom', rounds: 6 }).signature)
+})
+
 it('секундомер без лимита продолжает считать, старые настройки сохраняют лимит', () => {
   const cfg = { kind: 'fortime', capSec: 0, prepSec: 0 } as const
   const free = createTimer(cfg)

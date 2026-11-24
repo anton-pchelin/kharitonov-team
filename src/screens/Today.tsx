@@ -160,19 +160,24 @@ type CatalogProps = {
 }
 type ItemMode = 'exercise' | 'complex'
 
-function AddOwnItem({ workout, onAdd, ...catalog }: CatalogProps & {
+function AddOwnItem({ workout, onAdd, onOpenChange, ...catalog }: CatalogProps & {
   workout: Pick<Workout, 'id' | 'workout_items'>
   onAdd: (item: OwnItem) => void
+  onOpenChange?: (open: boolean) => void
 }) {
   const [mode, setMode] = useState<ItemMode | null>(null)
+  const selectMode = (next: ItemMode | null) => {
+    setMode(next)
+    onOpenChange?.(!!next)
+  }
   if (!mode) return <div className="row">
-    <button type="button" className="btn secondary" onClick={() => setMode('exercise')}>+ моё упражнение</button>
-    <button type="button" className="btn secondary" onClick={() => setMode('complex')}>+ комплекс</button>
+    <button type="button" className="btn secondary" onClick={() => selectMode('exercise')}>+ моё упражнение</button>
+    <button type="button" className="btn secondary" onClick={() => selectMode('complex')}>+ комплекс</button>
   </div>
-  return <OwnItemEditor {...catalog} mode={mode} onClose={() => setMode(null)} onSave={(patch) => {
+  return <OwnItemEditor {...catalog} mode={mode} onClose={() => selectMode(null)} onSave={(patch) => {
     const position = Math.max(999, ...(workout.workout_items ?? []).map((i) => i.position)) + 1
     onAdd({ ...patch, id: crypto.randomUUID(), workout_id: workout.id, position, video_url: null, superset: null, block_note: '', self: true })
-    setMode(null)
+    selectMode(null)
   }} />
 }
 
@@ -271,25 +276,26 @@ function AddOwnWorkout({ onAdd, ...catalog }: CatalogProps & {
   const [text, setText] = useState('')
   const [items, setItems] = useState<OwnItem[]>([])
   const [editing, setEditing] = useState<OwnItem | null>(null)
-  const close = () => { setId(null); setTitle(''); setText(''); setItems([]); setEditing(null) }
+  const [adding, setAdding] = useState(false)
+  const close = () => { setId(null); setTitle(''); setText(''); setItems([]); setEditing(null); setAdding(false) }
   if (!id) return <button className="btn secondary" onClick={() => setId(crypto.randomUUID())}>+ своя тренировка</button>
   return (
-    <form className="card own-form" onSubmit={(e) => { e.preventDefault(); if (title.trim()) { onAdd(id, title.trim(), text.trim(), items); close() } }}>
+    <form className="card own-form" onSubmit={(e) => { e.preventDefault(); if (title.trim() && !editing && !adding) { onAdd(id, title.trim(), text.trim(), items); close() } }}>
       <b>Своя тренировка</b>
       <input autoFocus placeholder="Например: Бег 5 км, 28:30" value={title} onChange={(e) => setTitle(e.target.value)} />
       <textarea rows={2} placeholder="Описание: разминка, темп, самочувствие" value={text} onChange={(e) => setText(e.target.value)} />
       {items.map((item) => <div className="row workout-item-actions" key={item.id}>
         <b>{item.name}</b>
-        <button type="button" className="link-btn" onClick={() => setEditing(item)}>Редактировать</button>
+        <button type="button" className="link-btn" disabled={adding} onClick={() => setEditing(item)}>Редактировать</button>
         <button type="button" className="link-btn" onClick={() => { setItems((list) => list.filter((i) => i.id !== item.id)); if (editing?.id === item.id) setEditing(null) }}>Удалить</button>
       </div>)}
       {editing
         ? <OwnItemEditor {...catalog} key={editing.id} item={editing} mode={isComplex(editing) ? 'complex' : 'exercise'}
             onSave={(patch) => { setItems((list) => list.map((i) => i.id === editing.id ? { ...i, ...patch } : i)); setEditing(null) }}
             onClose={() => setEditing(null)} />
-        : <AddOwnItem {...catalog} workout={{ id, workout_items: items }} onAdd={(item) => setItems((list) => [...list, item])} />}
-      <button className="btn" disabled={!title.trim() || !!editing}>Добавить тренировку</button>
-      <button type="button" className="btn secondary" onClick={close}>Отмена</button>
+        : <AddOwnItem {...catalog} workout={{ id, workout_items: items }} onOpenChange={setAdding} onAdd={(item) => setItems((list) => [...list, item])} />}
+      <button className="btn" disabled={!title.trim() || !!editing || adding}>Добавить тренировку</button>
+      <button type="button" className="btn secondary" disabled={adding} onClick={close}>Отмена</button>
     </form>
   )
 }

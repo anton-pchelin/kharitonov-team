@@ -50,7 +50,8 @@ export function Timer({ id, cfg, title, task = '', onClose, onResult }: {
   onResult?: (r: { rounds?: number; time_sec?: number; done: boolean }) => void
 }) {
   const key = `timer:${id}`
-  const config = JSON.stringify(cfg)
+  const clock = useMemo(() => createTimer(cfg), [cfg])
+  const config = clock.signature
   const read = (): Saved | null => {
     try {
       const state: Saved | null = JSON.parse(localStorage.getItem(key) ?? 'null')
@@ -63,7 +64,6 @@ export function Timer({ id, cfg, title, task = '', onClose, onResult }: {
   const last = useRef<string>('')
   const heard = useRef(-1)  // секунда последнего прозвучавшего сигнала
   const settings = useMemo(readTimerSettings, [])
-  const clock = useMemo(() => createTimer(cfg), [cfg])
   const cues = useMemo(() => clock.cues(settings), [clock, settings])
   const [sheet, setSheet] = useState(false)
 
@@ -106,12 +106,15 @@ export function Timer({ id, cfg, title, task = '', onClose, onResult }: {
     if (t - at < 2) playCue(cue, settings, audio.current)
   })
 
-  const start = () => {
+  const enableAudio = () => {
     if (typeof AudioContext !== 'undefined') {
       audio.current ??= new AudioContext()
       void audio.current.resume().catch(() => {})
     }
-    if (typeof speechSynthesis !== 'undefined') speechSynthesis.speak(new SpeechSynthesisUtterance(''))  // iPhone: голос тоже только после нажатия
+    if (typeof speechSynthesis !== 'undefined') speechSynthesis.speak(new SpeechSynthesisUtterance(''))  // iPhone: голос разрешается после нажатия
+  }
+  const start = () => {
+    enableAudio()
     heard.current = -1
     last.current = ''
     const start = Date.now()
@@ -158,13 +161,15 @@ export function Timer({ id, cfg, title, task = '', onClose, onResult }: {
         const at = Date.now()
         setNow(at)
         if (saved.pausedAt) {
-          void audio.current?.resume().catch(() => {})
+          enableAudio()
           save({ ...saved, start: saved.start + at - saved.pausedAt, pausedAt: undefined })
         } else {
           if (typeof speechSynthesis !== 'undefined') speechSynthesis.cancel()
           save({ ...saved, pausedAt: at })
         }
       }}>{saved.pausedAt ? 'Продолжить' : 'Пауза'}</button>}
+      {saved && !done && !audio.current && settings.sound !== 'off' && typeof AudioContext !== 'undefined' &&
+        <button className="btn secondary" onClick={enableAudio}>Включить звук</button>}
       {done && <button className="btn timer-btn" onClick={result}>{onResult ? 'Записать в задание' : 'Готово'}</button>}
       {saved && <button className="btn secondary" onClick={() => { if (confirm('Сбросить таймер?')) save(null) }}>Сбросить</button>}
       {task && settings.view === 'sheet' && (sheet

@@ -88,7 +88,7 @@ export function createTimer(cfg: TimerCfg) {
     }
     return out
   }
-  return { state, cues }
+  return { state, cues, signature: JSON.stringify([cfg.kind, prep, phases]) }
 }
 
 export const timerState = (cfg: TimerCfg, ms: number) => createTimer(cfg).state(ms)

@@ -256,6 +256,7 @@ for (const [name, engine] of Object.entries({ chromium, webkit })) {
           await page.getByRole('button', { name: '+ своя тренировка' }).click()
           await page.getByPlaceholder('Например: Бег 5 км, 28:30').fill('Самостоятельная тренировка')
           await page.getByRole('button', { name: '+ моё упражнение' }).click()
+          assert.equal(await page.getByRole('button', { name: 'Добавить тренировку' }).isDisabled(), true)
           await page.getByRole('searchbox', { name: 'Название упражнения' }).fill('Присед из тренировки')
           await page.getByRole('button', { name: 'В базу и в тренировку' }).click()
           await page.getByRole('button', { name: 'Редактировать', exact: true }).waitFor()
