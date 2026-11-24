@@ -150,6 +150,10 @@ for (const [name, engine] of Object.entries({ chromium, webkit })) {
           await openEditor(page)
           await page.getByPlaceholder('Название тренировки').fill('Вернуть после перезапуска')
           await page.getByRole('button', { name: '+ Комплекс', exact: true }).click()
+          await page.waitForFunction(() => {
+            const rect = document.querySelector('.editor .plan-text')?.getBoundingClientRect()
+            return rect && rect.top >= 0 && rect.top < window.innerHeight
+          })
           await page.getByLabel('Описание задания').fill('Текст комплекса')
           await page.reload()
           await openEditor(page)
@@ -166,6 +170,31 @@ for (const [name, engine] of Object.entries({ chromium, webkit })) {
           await openEditor(page)
           assert.equal(await page.getByRole('button', { name: 'Восстановить', exact: true }).count(), 0)
         } finally { await page.context().close() }
+      })
+
+      await suite.test('при отсутствии ответа редактор возвращает кнопку сохранения и сохраняет комплекс', async () => {
+        const response = hold()
+        const requested = hold()
+        const page = await visit(browser, plan, async (endpoint) => {
+          if (endpoint === 'rpc/save_workout') {
+            requested.release()
+            await response.wait
+            return { json: 'saved' }
+          }
+        })
+        try {
+          await page.clock.install()
+          await openEditor(page)
+          await page.getByRole('button', { name: '+ Комплекс', exact: true }).click()
+          await page.getByLabel('Описание задания').fill('Данные остаются в редакторе')
+          await page.getByRole('button', { name: 'Сохранить', exact: true }).click()
+          await requested.wait
+          assert.equal(await page.getByRole('button', { name: 'Сохраняю…' }).isDisabled(), true)
+          await page.clock.fastForward(20_100)
+          await page.getByRole('alert').filter({ hasText: '20 секунд' }).waitFor()
+          assert.equal(await page.getByRole('button', { name: 'Сохранить', exact: true }).isEnabled(), true)
+          assert.equal(await page.getByLabel('Описание задания').inputValue(), 'Данные остаются в редакторе')
+        } finally { response.release(); await page.context().close() }
       })
 
       await suite.test('новое упражнение защищено от двойного нажатия и потери ответа', async () => {
