@@ -405,22 +405,23 @@ for (const [name, engine] of Object.entries({ chromium, webkit })) {
           const fourth = page.getByRole('button', { name: 'Перетащить «Четвёртое»' })
           const fromCard = page.locator('.task').filter({ has: third })
           const toCard = page.locator('.task').filter({ has: fourth })
-          await toCard.evaluate((node) => node.scrollIntoView({ block: 'center' }))
+          await third.evaluate((node) => node.scrollIntoView({ block: 'center' }))
           const from = await third.boundingBox()
           const source = await fromCard.boundingBox()
           const target = await toCard.boundingBox()
           const x = from.x + from.width / 2
           const y = from.y + from.height / 2
           const distance = target.y + target.height / 2 - (source.y + source.height / 2)
-          const saved = page.waitForResponse((r) => r.url().endsWith('/rpc/reorder_own_workout_items'))
           await page.mouse.move(x, y)
           await page.mouse.down()
           await page.mouse.move(x, y + 10)
           await page.locator('.moving-task').waitFor()
           await page.mouse.move(x, y + distance, { steps: 18 })
           await page.getByText('Позиция 4', { exact: true }).waitFor({ state: 'attached' })
-          await page.mouse.up()
-          await saved
+          await Promise.all([
+            page.waitForResponse((r) => r.url().endsWith('/rpc/reorder_own_workout_items')),
+            page.mouse.up(),
+          ])
           assert.deepEqual(sent, { p_workout: 'w1', p_items: ['task-1', 'task-2', 'task-4', 'task-3'] })
           await page.reload()
           await third.waitFor()
