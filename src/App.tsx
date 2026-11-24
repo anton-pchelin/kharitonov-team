@@ -231,7 +231,7 @@ export function App() {
         {tab === 'athletes' && <Athletes />}
         {tab === 'athlete' && isCoach && <AthleteCard id={route[1]} />}
         {tab === 'plan' && isCoach && <Plan athleteId={route[1]} week={route[2]} open={route[3]} me={shown} />}
-        {tab === 'today' && !isCoach && (hasCoach ? <Today profile={shown} date={route[1]} />
+        {tab === 'today' && !isCoach && (hasCoach ? <Today profile={profile} date={route[1]} />
           : <p className="center muted">У вас пока нет тренера</p>)}
         {tab === 'progress' && (isCoach ? route[1] && <Progress athleteId={route[1]} title="Прогресс атлета" /> : <Progress athleteId={profile.id} />)}
         {tab === 'programs' && isCoach && <Programs id={route[1]} coachId={profile.id} />}

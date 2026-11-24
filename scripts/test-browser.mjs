@@ -37,10 +37,11 @@ after(async () => {
   if (dir) await rm(dir, { recursive: true, force: true })
 })
 
-async function visit(browser, hash, respond = () => undefined) {
+async function visit(browser, hash, respond = () => undefined, athleteView = false) {
   const page = await browser.newPage({ viewport: { width: 390, height: 844 }, serviceWorkers: 'block' })
   page.setDefaultTimeout(5000)
-  await page.addInitScript(({ coach }) => {
+  await page.addInitScript(({ coach, athleteView }) => {
+    if (athleteView) localStorage.setItem('viewAs', 'athlete')
     const enc = (data) => btoa(JSON.stringify(data)).replace(/=+$/, '')
     const expires_at = Math.floor(Date.now() / 1000) + 7200
     localStorage.setItem('sb-127-auth-token', JSON.stringify({
@@ -48,7 +49,7 @@ async function visit(browser, hash, respond = () => undefined) {
       refresh_token: 'local-refresh', expires_at,
       user: { id: coach, aud: 'authenticated', role: 'authenticated', app_metadata: {}, user_metadata: {} },
     }))
-  }, { coach })
+  }, { coach, athleteView })
   await page.route('**/mock/**', async (route) => {
     const req = route.request()
     const url = new URL(req.url())
@@ -216,6 +217,98 @@ for (const [name, engine] of Object.entries({ chromium, webkit })) {
           await field.waitFor({ state: 'detached' })
           assert.equal(writes.length, 2)
           assert.deepEqual(writes[0], writes[1])
+        } finally { await page.context().close() }
+      })
+
+      await suite.test('из своей тренировки можно пополнить базу, изменить и удалить задание', async () => {
+        const currentDate = new Date().toLocaleDateString('sv-SE')
+        const workouts = []
+        const items = []
+        const writes = []
+        const page = await visit(browser, '#/today/' + currentDate, (endpoint, url, req) => {
+          const id = url.searchParams.get('id')?.slice(3)
+          const method = req.method()
+          if (endpoint === 'rpc/my_access') return { json: { coach_id: b, until: null } }
+          if (endpoint === 'exercises' && method === 'POST') {
+            writes.push(req.postDataJSON())
+            return { status: 201 }
+          }
+          if (endpoint === 'workouts') {
+            if (method === 'POST') { workouts.push(req.postDataJSON()); return { status: 201 } }
+            return { json: workouts.map((w) => ({ ...w, workout_items: items.filter((i) => i.workout_id === w.id) })) }
+          }
+          if (endpoint === 'workout_items') {
+            if (method === 'POST') { items.push(req.postDataJSON()); return { status: 201 } }
+            const i = items.findIndex((item) => item.id === id)
+            if (method === 'PATCH') {
+              items[i] = { ...items[i], ...req.postDataJSON() }
+              return { json: [{ id }] }
+            }
+            if (method === 'DELETE') {
+              assert.ok(i >= 0)
+              items.splice(i, 1)
+              return { json: [] }
+            }
+          }
+        }, true)
+        try {
+          page.on('dialog', (dialog) => dialog.accept())
+          await page.getByRole('button', { name: '+ своя тренировка' }).click()
+          await page.getByPlaceholder('Например: Бег 5 км, 28:30').fill('Самостоятельная тренировка')
+          await page.getByRole('button', { name: '+ моё упражнение' }).click()
+          assert.equal(await page.getByRole('button', { name: 'Добавить тренировку' }).isDisabled(), true)
+          await page.getByRole('searchbox', { name: 'Название упражнения' }).fill('Присед из тренировки')
+          await page.getByRole('button', { name: 'В базу и в тренировку' }).click()
+          await page.getByRole('button', { name: 'Редактировать', exact: true }).waitFor()
+          assert.equal(writes.length, 1)
+          assert.equal(writes[0].source, 'coach')
+          const saved = page.waitForResponse((r) => r.url().includes('/workout_items') && r.request().method() === 'POST')
+          await page.getByRole('button', { name: 'Добавить тренировку' }).click()
+          await saved
+          assert.equal(items[0].exercise_id, writes[0].id)
+          const itemId = items[0].id
+          await page.getByRole('button', { name: 'Редактировать «Присед из тренировки»' }).click()
+          await page.getByLabel('Описание задания').fill('Изменённое описание')
+          await page.getByLabel('Таймер', { exact: true }).selectOption('emom')
+          await page.getByLabel('Интервал · минуты').fill('6')
+          await page.getByLabel('Раундов').fill('5')
+          const edited = page.waitForResponse((r) => r.url().includes('/workout_items') && r.request().method() === 'PATCH')
+          await page.getByRole('button', { name: 'Сохранить', exact: true }).click()
+          await edited
+          assert.equal(items[0].id, itemId)
+          assert.deepEqual(items[0].timer, { kind: 'emom', intervalSec: 360, rounds: 5 })
+          await page.getByText('Изменённое описание', { exact: true }).waitFor()
+          const deleted = page.waitForResponse((r) => r.url().includes('/workout_items') && r.request().method() === 'DELETE')
+          await page.getByRole('button', { name: 'Удалить «Присед из тренировки»' }).click()
+          await deleted
+          assert.equal(items.length, 0)
+          await page.getByRole('heading', { name: /Самостоятельная тренировка/ }).waitFor()
+        } finally { await page.context().close() }
+      })
+
+      await suite.test('свободный таймер переключается между паузой и работой', async () => {
+        const currentDate = new Date().toLocaleDateString('sv-SE')
+        const page = await visit(browser, '#/today/' + currentDate, (endpoint) =>
+          endpoint === 'rpc/my_access' ? { json: { coach_id: b, until: null } } : undefined, true)
+        try {
+          await page.clock.install()
+          await page.getByRole('button', { name: 'Свободный таймер', exact: true }).click()
+          await page.getByLabel('Подготовка · секунды').fill('0')
+          await page.getByRole('button', { name: 'Открыть таймер' }).click()
+          const timer = page.getByRole('dialog')
+          await timer.getByRole('button', { name: '▶ Старт' }).click()
+          await page.clock.fastForward(2000)
+          await timer.getByRole('button', { name: 'Пауза', exact: true }).click()
+          const readout = timer.locator('.timer-big')
+          const paused = await readout.textContent()
+          await page.clock.fastForward(3000)
+          assert.equal(await readout.textContent(), paused)
+          await timer.getByRole('button', { name: 'Продолжить', exact: true }).click()
+          await page.clock.fastForward(2000)
+          await page.waitForFunction((previous) => document.querySelector('.timer-big')?.textContent !== previous, paused)
+          await timer.getByRole('button', { name: 'Финиш', exact: true }).click()
+          await timer.getByRole('button', { name: 'Готово', exact: true }).click()
+          await timer.waitFor({ state: 'detached' })
         } finally { await page.context().close() }
       })
 

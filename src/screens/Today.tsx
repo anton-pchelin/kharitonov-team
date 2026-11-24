@@ -1,15 +1,17 @@
 import { useEffect, useState, useSyncExternalStore } from 'react'
-import { supabase, type Profile } from '../supabase'
+import { createCatalogExercise, supabase, type Profile } from '../supabase'
 import { searchExercises, type Exercise } from '../search'
 import { loadExercises } from './Exercises'
 import { WorkoutView, progress } from './WorkoutView'
-import { OfflineStore } from '../lib/offline'
+import { OfflineStore, type ItemEdit } from '../lib/offline'
 import { prepareVideo, putBlob } from '../lib/videoUpload'
 import { Timer } from './Timer'
+import { TimerFields } from './TimerFields'
+import { defaultTimer, type TimerCfg } from '../lib/timer'
 import type { WorkoutItem } from '../lib/workout'
 import { addDays, dayShort, fmtDay, mondayOf, parseIso, today, weekDays } from '../lib/dates'
 import { fmtNum } from '../lib/format'
-import { COMPLEX_RESULTS, RESULT_TYPES, complexName, type ResultType, type Workout } from '../lib/workout'
+import { COMPLEX_RESULTS, RESULT_TYPES, complexName, complexRounds, isComplex, type ResultType, type Workout } from '../lib/workout'
 
 const stores = new Map<string, OfflineStore>()
 export const storeFor = (userId: string) => {
@@ -26,6 +28,9 @@ export function Today({ profile, date: routeDate }: { profile: Profile; date?: s
   const [exercises, setExercises] = useState<Exercise[]>([])
   const [coachName, setCoachName] = useState('Тренер')
   const [timer, setTimer] = useState<WorkoutItem | null>(null)
+  const [freeTimer, setFreeTimer] = useState<'setup' | 'running' | null>(null)
+  const [freeConfig, setFreeConfig] = useState<TimerCfg | null>(() => defaultTimer('fortime'))
+  const [editId, setEditId] = useState<string | null>(null)
   const date = routeDate ?? today()
   const go = (d: string) => { location.hash = `#/today/${d}` }
 
@@ -42,10 +47,11 @@ export function Today({ profile, date: routeDate }: { profile: Profile; date?: s
   const editable = date >= addDays(today(), -7)  // правка своих результатов — 7 дней назад
   const names = { [profile.id]: profile.name, ...Object.fromEntries(data.comments.filter((c) => c.author_id !== profile.id).map((c) => [c.author_id, coachName])) }
 
-  const addOwnWorkout = (title: string, prescription: string) => store.do({
-    t: 'workout',
-    row: { id: crypto.randomUUID(), athlete_id: profile.id, date, title, prescription, published: true, self: true, completed_at: null, workout_items: [] },
-  })
+  const addOwnWorkout = (id: string, title: string, prescription: string, items: OwnItem[]) => store.do(
+    { t: 'workout', row: { id, athlete_id: profile.id, date, title, prescription, published: true, self: true, completed_at: null, workout_items: [] } },
+    ...items.map((row) => ({ t: 'item' as const, row })),
+  )
+  const rememberExercise = (exercise: Exercise) => setExercises((list) => list.some((x) => x.id === exercise.id) ? list : [...list, exercise])
 
   return (
     <>
@@ -71,21 +77,27 @@ export function Today({ profile, date: routeDate }: { profile: Profile; date?: s
       <p className={'sync ' + store.status}>{STATUS[store.status]}{store.lastError && ` · ошибка: ${store.lastError}`}</p>
       {date !== today() && <button className="link-btn" onClick={() => go(today())}>← к сегодняшнему дню</button>}
 
+      <button className="btn small secondary" onClick={() => setFreeTimer('setup')}>Свободный таймер</button>
       {!data.syncedAt && !day.length && <p className="muted">Загрузка…</p>}
       {data.syncedAt && !day.length && <p className="muted">Отдых — тренировок на этот день нет.</p>}
 
-      {day.map((w) => (
-        <div key={w.id}>
+      {day.map((w) => {
+        const editing = w.workout_items?.find((i) => i.self && i.id === editId)
+        return <div key={w.id}>
           <WorkoutView workout={w} results={data.results} comments={data.comments} history={data.history}
             me={profile.id} names={names} editable={editable} maxes={data.records ?? []}
             gym={{ bar: profile.bar ?? 20, plates: profile.plates ?? [25, 20, 15, 10, 5, 2.5, 1.25] }}
             extra={(item) => item.timer?.kind && editable && <button className="btn small" onClick={() => setTimer(item)}>▶ Таймер</button>}
             onMax={(item, weight) => store.do({ t: 'record', row: { id: crypto.randomUUID(), athlete_id: profile.id, exercise_id: item.exercise_id, name: item.name, weight, reps: 1 } })}
             onSet={(row) => store.do({ t: 'set', row })}
+            onEdit={(item) => setEditId(item.id)}
             onDelete={(item) => {
               if (!item) {
                 if (confirm(`Удалить тренировку «${w.title || 'Тренировка'}» и все её подходы?`)) store.do({ t: 'delete_workout', id: w.id })
-              } else if (confirm(`Удалить «${item.name}» и все его подходы?`)) store.do({ t: 'delete_item', id: item.id, workout_id: w.id })
+              } else if (confirm('Удалить «' + item.name + '» и его подходы?')) {
+                if (editId === item.id) setEditId(null)
+                store.do({ t: 'delete_item', id: item.id, workout_id: w.id })
+              }
             }}
             onUnset={(item_id, set_no) => store.do({ t: 'unset', item_id, set_no })}
             onVideo={async (item_id, text, file) => {
@@ -98,15 +110,33 @@ export function Today({ profile, date: routeDate }: { profile: Profile; date?: s
               t: 'comment',
               row: { id, workout_id: w.id, item_id, author_id: profile.id, text, created_at: new Date().toISOString() },
             })} />
-          {editable && <AddOwnItem workout={w} exercises={exercises} onAdd={(row) => store.do({ t: 'item', row })} />}
+          {editable && (editing
+            ? <OwnItemEditor key={editing.id} item={editing} mode={isComplex(editing) ? 'complex' : 'exercise'}
+                hasResults={data.results.some((r) => r.item_id === editing.id)}
+                exercises={exercises} source={profile.role} onCatalog={rememberExercise}
+                onSave={(patch) => { store.do({ t: 'edit_item', id: editing.id, workout_id: w.id, patch }); setEditId(null) }}
+                onClose={() => setEditId(null)} />
+            : <AddOwnItem workout={w} exercises={exercises} source={profile.role} onCatalog={rememberExercise}
+                onAdd={(row) => store.do({ t: 'item', row })} />)}
           {editable && <Finish workout={w} results={data.results} onDone={() => store.do({ t: 'complete', id: w.id, at: new Date().toISOString() })} />}
         </div>
-      ))}
+      })}
 
-      {editable && <AddOwnWorkout onAdd={addOwnWorkout} />}
+      {editable && <AddOwnWorkout onAdd={addOwnWorkout} exercises={exercises} source={profile.role} onCatalog={rememberExercise} />}
+      {freeTimer === 'setup' && <section className="card own-form">
+        <b>Свободный таймер</b>
+        <TimerFields cfg={freeConfig} onChange={setFreeConfig} />
+        <button className="btn" disabled={!freeConfig} onClick={() => setFreeTimer('running')}>Открыть таймер</button>
+        <button className="btn secondary" onClick={() => setFreeTimer(null)}>Отмена</button>
+      </section>}
+      {freeTimer === 'running' && freeConfig && <Timer id="free" cfg={freeConfig} title="Таймер" onClose={() => setFreeTimer(null)} />}
       {timer?.timer && (
         <Timer id={timer.id} cfg={timer.timer} title={timer.name} task={[timer.block_note, timer.plan_text].filter(Boolean).join('\n\n')} onClose={() => setTimer(null)}
-          onResult={(r) => store.do({ t: 'set', row: { ...(data.results.find((x) => x.item_id === timer.id && x.set_no === 1) ?? {}), item_id: timer.id, set_no: 1, ...r } })} />
+          onResult={(r) => store.do({ t: 'set', row: {
+            ...data.results.find((x) => x.item_id === timer.id && x.set_no === 1), item_id: timer.id, set_no: 1, done: r.done,
+            ...(timer.result_type === 'rounds' && r.rounds !== undefined ? { rounds: r.rounds } : {}),
+            ...(timer.result_type === 'time' && r.time_sec !== undefined ? { time_sec: r.time_sec } : {}),
+          } })} />
       )}
     </>
   )
@@ -122,113 +152,150 @@ function Finish({ workout, results, onDone }: { workout: Workout; results: Param
   )
 }
 
-function AddOwnItem({ workout, exercises, onAdd }: {
-  workout: Workout; exercises: Exercise[]; onAdd: (row: NonNullable<Workout['workout_items']>[number] & { workout_id: string }) => void
+type OwnItem = WorkoutItem & { workout_id: string }
+type CatalogProps = {
+  exercises: Exercise[]
+  source: 'coach' | 'athlete'
+  onCatalog: (exercise: Exercise) => void
+}
+type ItemMode = 'exercise' | 'complex'
+
+function AddOwnItem({ workout, onAdd, onOpenChange, ...catalog }: CatalogProps & {
+  workout: Pick<Workout, 'id' | 'workout_items'>
+  onAdd: (item: OwnItem) => void
+  onOpenChange?: (open: boolean) => void
 }) {
-  const [open, setOpen] = useState<'ex' | 'complex' | null>(null)
-  const [q, setQ] = useState('')
-  const [picked, setPicked] = useState<{ name: string; exercise_id: string | null } | null>(null)
-  const [type, setType] = useState<ResultType>('weight_reps')
-  const [sets, setSets] = useState(3)
-  const [plan, setPlan] = useState('')
-  const [rounds, setRounds] = useState(5)
-
-  if (!open) return (
-    <>
-      <button className="btn secondary" onClick={() => setOpen('ex')}>+ моё упражнение</button>
-      <button className="btn secondary" onClick={() => { setOpen('complex'); setType('time') }}>+ комплекс</button>
-    </>
-  )
-  const close = () => { setOpen(null); setQ(''); setPicked(null); setPlan(''); setType('weight_reps'); setSets(3) }
-
-  if (open === 'complex') return (
-    <div className="card own-form">
-      <b>Комплекс</b>
-      <textarea autoFocus rows={3} placeholder="Что делать: 10 подтягиваний, 15 приседов, 200 м бег" value={plan} onChange={(e) => setPlan(e.target.value)} />
-      <div className="segmented">
-        {COMPLEX_RESULTS.map(([k, l]) => <button key={k} type="button" className={type === k ? 'active' : ''} onClick={() => setType(k)}>{l}</button>)}
-      </div>
-      {type !== 'rounds' && (
-        <div className="row-between">
-          <span>Раундов</span>
-          <div className="stepper">
-            <button type="button" onClick={() => setRounds(Math.max(1, rounds - 1))} aria-label="Меньше раундов">−</button>
-            <span>{rounds}</span>
-            <button type="button" onClick={() => setRounds(rounds + 1)} aria-label="Больше раундов">+</button>
-          </div>
-        </div>
-      )}
-      <button className="btn" onClick={() => {
-        if (!plan.trim()) return alert('Напишите, что делать в комплексе')
-        onAdd({
-          id: crypto.randomUUID(), workout_id: workout.id, position: 1000 + (workout.workout_items?.length ?? 0),
-          exercise_id: null, name: complexName(type === 'rounds' ? null : rounds), plan_text: plan.trim(), video_url: null,
-          result_type: type, planned_sets: 1, superset: null, block_note: '', self: true,
-        })
-        close()
-      }}>Добавить</button>
-      <button className="btn secondary" onClick={close}>Отмена</button>
-    </div>
-  )
-
-  const add = async () => {
-    let it = picked ?? { name: q.trim(), exercise_id: null }
-    if (!it.name) return
-    if (!it.exercise_id && navigator.onLine) {
-      // новое название — в общую базу, чтобы потом находилось; без сети просто сохраним в тренировке
-      const { data } = await supabase.from('exercises').insert({ name: it.name, source: 'athlete' }).select('id').single()
-      if (data) it = { ...it, exercise_id: data.id }
-    }
-    onAdd({
-      id: crypto.randomUUID(), workout_id: workout.id, position: 1000 + (workout.workout_items?.length ?? 0),
-      exercise_id: it.exercise_id, name: it.name, plan_text: plan.trim(), video_url: null, result_type: type,
-      planned_sets: type === 'check' ? 1 : sets, superset: null, block_note: '', self: true,
-    })
-    close()
+  const [mode, setMode] = useState<ItemMode | null>(null)
+  const selectMode = (next: ItemMode | null) => {
+    setMode(next)
+    onOpenChange?.(!!next)
   }
-
-  const found = q && !picked ? searchExercises(exercises, q).slice(0, 6) : []
-  return (
-    <div className="card own-form">
-      <b>Моё упражнение</b>
-      <input type="search" placeholder="Поиск или новое название" value={picked?.name ?? q}
-        onChange={(e) => { setPicked(null); setQ(e.target.value) }} />
-      {found.length > 0 && (
-        <div className="suggest">
-          {found.map((e) => <button key={e.id} onClick={() => { setPicked({ name: e.name, exercise_id: e.id }); if (e.default_result_type) setType(e.default_result_type); if (e.default_result_type === 'cardio') setSets(1) }}>{e.name}</button>)}
-        </div>
-      )}
-      <textarea rows={2} placeholder="Описание: 3×10, резина синяя" value={plan} onChange={(e) => setPlan(e.target.value)} />
-      <div className="row">
-        <select value={type} onChange={(e) => setType(e.target.value as ResultType)} aria-label="Тип результата">
-          {RESULT_TYPES.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
-        </select>
-        {type !== 'check' && (
-          <div className="stepper">
-            <button type="button" onClick={() => setSets(Math.max(1, sets - 1))} aria-label="Меньше подходов">−</button>
-            <span>{sets}</span>
-            <button type="button" onClick={() => setSets(sets + 1)} aria-label="Больше подходов">+</button>
-          </div>
-        )}
-      </div>
-      <button className="btn" onClick={add}>Добавить</button>
-      <button className="btn secondary" onClick={close}>Отмена</button>
-    </div>
-  )
+  if (!mode) return <div className="row">
+    <button type="button" className="btn secondary" onClick={() => selectMode('exercise')}>+ моё упражнение</button>
+    <button type="button" className="btn secondary" onClick={() => selectMode('complex')}>+ комплекс</button>
+  </div>
+  return <OwnItemEditor {...catalog} mode={mode} onClose={() => selectMode(null)} onSave={(patch) => {
+    const position = Math.max(999, ...(workout.workout_items ?? []).map((i) => i.position)) + 1
+    onAdd({ ...patch, id: crypto.randomUUID(), workout_id: workout.id, position, video_url: null, superset: null, block_note: '', self: true })
+    selectMode(null)
+  }} />
 }
 
-function AddOwnWorkout({ onAdd }: { onAdd: (title: string, prescription: string) => void }) {
-  const [open, setOpen] = useState(false)
+function OwnItemEditor({ mode, item, hasResults = false, exercises, source, onCatalog, onSave, onClose }: CatalogProps & {
+  mode: ItemMode; item?: WorkoutItem; hasResults?: boolean; onSave: (patch: ItemEdit) => void; onClose: () => void
+}) {
+  const complex = mode === 'complex'
+  const [name, setName] = useState(item?.name ?? '')
+  const [linked, setLinked] = useState(item?.exercise_id ?? null)
+  const [type, setType] = useState<ResultType>(item?.result_type ?? (complex ? 'time' : 'weight_reps'))
+  const [sets, setSets] = useState(item?.planned_sets ?? 3)
+  const [plan, setPlan] = useState(item?.plan_text ?? '')
+  const [rounds, setRounds] = useState(item ? complexRounds(item.name) ?? 5 : 5)
+  const [timer, setTimer] = useState<TimerCfg | null>(item?.timer ?? null)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const [pending] = useState(() => new Map<string, string>())
+  const input = name.trim()
+  const found = input && !linked && !complex && !hasResults ? searchExercises(exercises, input).slice(0, 6) : []
+
+  const save = async (inCatalog: boolean) => {
+    if (busy || (complex ? !plan.trim() : !input)) return
+    let exercise_id = linked
+    if (inCatalog && !linked) {
+      if (!navigator.onLine) { setError('Чтобы добавить упражнение в базу, нужен интернет.'); return }
+      const id = pending.get(input) ?? crypto.randomUUID()
+      pending.set(input, id)
+      setBusy(true)
+      setError('')
+      try {
+        const exercise = await createCatalogExercise(id, input, source)
+        onCatalog(exercise)
+        exercise_id = exercise.id
+      } catch {
+        setError('Не удалось добавить в базу. Проверьте связь и повторите.')
+        return
+      } finally { setBusy(false) }
+    }
+    onSave({
+      exercise_id, name: complex ? complexName(type === 'rounds' ? null : rounds) : input,
+      plan_text: plan.trim(), result_type: type, planned_sets: complex || type === 'check' ? 1 : sets, timer,
+    })
+  }
+
+  return <div className="card own-form">
+    <b>{item ? 'Редактировать задание' : complex ? 'Комплекс' : 'Моё упражнение'}</b>
+    {!complex && <>
+      <input autoFocus type="search" aria-label="Название упражнения" placeholder="Поиск или новое название"
+        value={name} disabled={busy || hasResults} onChange={(e) => { setName(e.target.value); setLinked(null); setError('') }} />
+      {found.length > 0 && <div className="suggest">{found.map((e) => (
+        <button key={e.id} type="button" disabled={busy} onClick={() => {
+          setName(e.name)
+          setLinked(e.id)
+          if (e.default_result_type) setType(e.default_result_type)
+          if (e.default_result_type === 'cardio') setSets(1)
+        }}>{e.name}</button>
+      ))}</div>}
+    </>}
+    <textarea autoFocus={complex || hasResults} rows={3} aria-label="Описание задания" placeholder={complex ? 'Что делать в комплексе' : 'Описание: 3×10, резина синяя'}
+      value={plan} disabled={busy} onChange={(e) => setPlan(e.target.value)} />
+    <div className="row">
+      <select value={type} disabled={busy || hasResults} onChange={(e) => setType(e.target.value as ResultType)} aria-label="Тип результата">
+        {(complex ? COMPLEX_RESULTS : RESULT_TYPES).map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+      </select>
+      {(complex ? type !== 'rounds' : type !== 'check') && <label>{complex ? 'Раундов' : 'Подходов'}
+        <input type="number" inputMode="numeric" min={1} max={complex ? 100 : 50} disabled={busy}
+          value={complex ? rounds : sets} onChange={(e) => (complex ? setRounds : setSets)(
+            Math.min(complex ? 100 : 50, Math.max(1, Math.round(Number(e.target.value)) || 1))
+          )} />
+      </label>}
+    </div>
+    <fieldset disabled={busy} className="workout-fields">
+      <TimerFields cfg={timer} onChange={(cfg) => {
+        setTimer(cfg)
+        if (complex && !hasResults && cfg?.kind !== timer?.kind && cfg?.kind === 'amrap') setType('rounds')
+        if (complex && !hasResults && cfg?.kind !== timer?.kind && cfg?.kind === 'fortime') setType('time')
+      }} />
+    </fieldset>
+    {error && <p role="alert" className="error">{error}</p>}
+    <div className="row">
+      {!complex && !linked && !hasResults && <button type="button" className="btn" disabled={busy || !input}
+        onClick={() => save(true)}>{busy ? 'Добавляю в базу…' : 'В базу и в тренировку'}</button>}
+      <button type="button" className="btn secondary" disabled={busy || (complex ? !plan.trim() : !input)} onClick={() => save(false)}>
+        {item ? 'Сохранить' : !complex && !linked ? 'Только в тренировку' : 'Добавить'}
+      </button>
+      <button type="button" className="btn secondary" disabled={busy} onClick={onClose}>Отмена</button>
+    </div>
+  </div>
+}
+
+function AddOwnWorkout({ onAdd, ...catalog }: CatalogProps & {
+  onAdd: (id: string, title: string, prescription: string, items: OwnItem[]) => void
+}) {
+  const [id, setId] = useState<string | null>(null)
   const [title, setTitle] = useState('')
   const [text, setText] = useState('')
-  if (!open) return <button className="btn secondary" onClick={() => setOpen(true)}>+ своя тренировка</button>
+  const [items, setItems] = useState<OwnItem[]>([])
+  const [editing, setEditing] = useState<OwnItem | null>(null)
+  const [adding, setAdding] = useState(false)
+  const close = () => { setId(null); setTitle(''); setText(''); setItems([]); setEditing(null); setAdding(false) }
+  if (!id) return <button className="btn secondary" onClick={() => setId(crypto.randomUUID())}>+ своя тренировка</button>
   return (
-    <form className="card own-form" onSubmit={(e) => { e.preventDefault(); if (title.trim()) { onAdd(title.trim(), text.trim()); setOpen(false); setTitle(''); setText('') } }}>
+    <form className="card own-form" onSubmit={(e) => { e.preventDefault(); if (title.trim() && !editing && !adding) { onAdd(id, title.trim(), text.trim(), items); close() } }}>
       <b>Своя тренировка</b>
       <input autoFocus placeholder="Например: Бег 5 км, 28:30" value={title} onChange={(e) => setTitle(e.target.value)} />
       <textarea rows={2} placeholder="Описание: разминка, темп, самочувствие" value={text} onChange={(e) => setText(e.target.value)} />
-      <button className="btn">Добавить</button>
-      <button type="button" className="btn secondary" onClick={() => setOpen(false)}>Отмена</button>
+      {items.map((item) => <div className="row workout-item-actions" key={item.id}>
+        <b>{item.name}</b>
+        <button type="button" className="link-btn" disabled={adding} onClick={() => setEditing(item)}>Редактировать</button>
+        <button type="button" className="link-btn" onClick={() => { setItems((list) => list.filter((i) => i.id !== item.id)); if (editing?.id === item.id) setEditing(null) }}>Удалить</button>
+      </div>)}
+      {editing
+        ? <OwnItemEditor {...catalog} key={editing.id} item={editing} mode={isComplex(editing) ? 'complex' : 'exercise'}
+            onSave={(patch) => { setItems((list) => list.map((i) => i.id === editing.id ? { ...i, ...patch } : i)); setEditing(null) }}
+            onClose={() => setEditing(null)} />
+        : <AddOwnItem {...catalog} workout={{ id, workout_items: items }} onOpenChange={setAdding} onAdd={(item) => setItems((list) => [...list, item])} />}
+      <button className="btn" disabled={!title.trim() || !!editing || adding}>Добавить тренировку</button>
+      <button type="button" className="btn secondary" disabled={adding} onClick={close}>Отмена</button>
     </form>
   )
 }

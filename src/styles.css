@@ -177,6 +177,12 @@ main:has(.week) { max-width: 1200px; }
 .comment.mine { background: var(--done-bg); }
 .comment-form { gap: 6px; }
 .own-form { display: flex; flex-direction: column; gap: 8px; }
+.timer-fields, .timer-options { display: grid; gap: 8px; }
+.timer-options .row { flex-wrap: wrap; }
+.timer-options input[type=number] { width: 6rem; }
+.timer-options label { display: grid; gap: 4px; }
+.timer-options label.switch { display: flex; }
+.workout-item-actions { display: flex; flex-wrap: wrap; gap: 4px 12px; }
 .tag-done { background: var(--primary); color: var(--on-primary); }
 
 /* Этап 4: уведомления */

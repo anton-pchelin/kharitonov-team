@@ -27,12 +27,15 @@ export type Comment = {
 export type PastSet = SetResult & { date: string; name: string; exercise_id: string | null }
 
 export type Cache = { workouts: Workout[]; results: SetResult[]; comments: Comment[]; history: PastSet[]; records: MaxRecord[]; syncedAt: string | null }
+export type ItemEdit = Pick<WorkoutItem, 'name' | 'exercise_id' | 'plan_text' | 'result_type' | 'planned_sets' | 'timer'>
+
 export type Op =
   | { t: 'set'; row: SetResult }
   | { t: 'unset'; item_id: string; set_no: number }
   | { t: 'comment'; row: Comment }
   | { t: 'workout'; row: Workout }
   | { t: 'item'; row: WorkoutItem & { workout_id: string } }
+  | { t: 'edit_item'; id: string; workout_id: string; patch: ItemEdit }
   | { t: 'complete'; id: string; at: string }
   | { t: 'record'; row: MaxRecord & { id: string; athlete_id: string } }
   | { t: 'video'; row: Comment }  // файл лежит в IndexedDB под ключом row.id
@@ -55,6 +58,12 @@ export function applyLocal(c: Cache, op: Op): Cache {
       workouts: c.workouts.map((w) => w.id !== op.row.workout_id || w.workout_items?.some((i) => i.id === op.row.id) ? w
         : { ...w, workout_items: [...(w.workout_items ?? []), op.row] }),
     }
+    case 'edit_item': return {
+      ...c,
+      workouts: c.workouts.map((w) => w.id === op.workout_id
+        ? { ...w, workout_items: w.workout_items?.map((item) => item.id === op.id && item.self ? { ...item, ...op.patch } : item) }
+        : w),
+    }
     case 'complete': return { ...c, workouts: c.workouts.map((w) => (w.id === op.id ? { ...w, completed_at: w.completed_at ?? op.at } : w)) }
     case 'record': return { ...c, records: [...(c.records ?? []), op.row] }
     case 'video': return c.comments.some((x) => x.id === op.row.id) ? c : { ...c, comments: [...c.comments, { ...op.row, video_path: 'local:' + op.row.id }] }
@@ -71,6 +80,7 @@ export function applyLocal(c: Cache, op: Op): Cache {
       ...c,
       workouts: c.workouts.map((w) => (w.id === op.workout_id ? { ...w, workout_items: w.workout_items?.filter((i) => i.id !== op.id) } : w)),
       results: c.results.filter((r) => r.item_id !== op.id),
+      comments: c.comments.map((c) => c.item_id === op.id ? { ...c, item_id: null } : c),
     }
   }
 }
@@ -87,6 +97,11 @@ async function send(op: Op, userId: string): Promise<{ error: { code?: string; m
       return supabase.from('workouts').upsert({ ...row, self: true, published: true }, { onConflict: 'id', ignoreDuplicates: true })
     }
     case 'item': return supabase.from('workout_items').upsert({ ...op.row, self: true }, { onConflict: 'id', ignoreDuplicates: true })
+    case 'edit_item': {
+      const { data, error } = await supabase.from('workout_items').update(op.patch).eq('id', op.id)
+        .eq('workout_id', op.workout_id).eq('self', true).select('id').maybeSingle()
+      return { error: error ?? (data ? null : { code: 'PGRST116', message: 'Задание уже удалено или недоступно' }) }
+    }
     case 'complete': return supabase.rpc('complete_workout', { p_id: op.id, p_at: op.at })
     case 'record': return supabase.from('records').upsert(op.row, { onConflict: 'id', ignoreDuplicates: true })
     case 'delete_workout': return supabase.from('workouts').delete().eq('id', op.id).eq('self', true)
@@ -143,9 +158,9 @@ export class OfflineStore {
   getSnapshot = () => this.snapshot
 
   /** Ввод атлета: сразу в телефон, потом — на сервер. */
-  do(op: Op) {
-    this.cache = applyLocal(this.cache, op)
-    this.queue.push(op)
+  do(...ops: Op[]) {
+    this.cache = ops.reduce(applyLocal, this.cache)
+    this.queue.push(...ops)
     this.save()
     this.emit()
     this.flush()

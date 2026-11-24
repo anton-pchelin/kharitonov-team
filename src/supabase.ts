@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js'
 import type { ThemeMode } from './theme'
+import type { Exercise } from './search'
 
 const url = import.meta.env.VITE_SUPABASE_URL
 const key = import.meta.env.VITE_SUPABASE_ANON_KEY
@@ -19,6 +20,12 @@ const fetchWithTimeout: typeof fetch = (input, init) => {
 }
 
 export const supabase = createClient(url, key, { global: { fetch: fetchWithTimeout } })
+
+export async function createCatalogExercise(id: string, name: string, source: 'coach' | 'athlete'): Promise<Exercise> {
+  const { error } = await supabase.from('exercises').upsert({ id, name, source }, { ignoreDuplicates: true })
+  if (error) throw error
+  return { id, name, source, aliases: [], muscles: [], equipment: null, image_url: null, video_url: null }
+}
 
 export async function sendCoachComment(workout_id: string, item_id: string | null, text: string, id: string) {
   const { error } = await supabase.from('comments').upsert({ id, workout_id, item_id, text }, { ignoreDuplicates: true })

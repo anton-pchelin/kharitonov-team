@@ -26,6 +26,7 @@ export type ViewProps = {
   onComment?: (itemId: string | null, text: string, id: string) => void | Promise<void>
   onVideo?: (itemId: string, text: string, file: File) => Promise<void>  // атлет прикладывает видео подхода
   extra?: (item: WorkoutItem) => ReactNode  // доп. кнопки задания (видео, таймер — следующие этапы)
+  onEdit?: (item: WorkoutItem) => void
   onDelete?: (item: WorkoutItem | null) => void  // атлет удаляет своё: задание «сам» или (null) свою тренировку
 }
 
@@ -99,12 +100,14 @@ function ItemView(p: ViewProps & { item: WorkoutItem; label: string; note: strin
         ) : <b className="item-label">{p.label}</b>}
         <b className="task-name">{item.name}</b>
         {item.result_type !== 'check' && <span className="muted">{isComplex(item) ? '' : `${item.planned_sets}× `}{resultLabel(item.result_type)}</span>}
-        {item.self && !p.workout.self && p.onDelete && (
-          <button className="link-btn" onClick={() => p.onDelete!(item)} aria-label={`Удалить «${item.name}»`}>Удалить</button>
-        )}
+
       </div>
       {item.pct != null && <PctHint {...p} item={item} />}
       <Markup text={item.plan_text} />
+      {item.self && p.editable && (p.onEdit || p.onDelete) && <div className="workout-item-actions">
+        {p.onEdit && <button className="link-btn" onClick={() => p.onEdit!(item)} aria-label={'Редактировать «' + item.name + '»'}>Редактировать</button>}
+        {p.onDelete && <button className="link-btn" onClick={() => p.onDelete!(item)} aria-label={'Удалить «' + item.name + '»'}>Удалить</button>}
+      </div>}
       <div className="row-wrap">
         <Video url={item.video_url} />
         {p.extra?.(item)}
