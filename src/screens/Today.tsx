@@ -81,9 +81,8 @@ export function Today({ profile, date: routeDate }: { profile: Profile; date?: s
       {!data.syncedAt && !day.length && <p className="muted">Загрузка…</p>}
       {data.syncedAt && !day.length && <p className="muted">Отдых — тренировок на этот день нет.</p>}
 
-      {day.map((w) => {
-        const editing = w.workout_items?.find((i) => i.self && i.id === editId)
-        return <div key={w.id}>
+      {day.map((w) => (
+        <div key={w.id}>
           <WorkoutView workout={w} results={data.results} comments={data.comments} history={data.history}
             me={profile.id} names={names} editable={editable} maxes={data.records ?? []}
             gym={{ bar: profile.bar ?? 20, plates: profile.plates ?? [25, 20, 15, 10, 5, 2.5, 1.25] }}
@@ -91,6 +90,12 @@ export function Today({ profile, date: routeDate }: { profile: Profile; date?: s
             onMax={(item, weight) => store.do({ t: 'record', row: { id: crypto.randomUUID(), athlete_id: profile.id, exercise_id: item.exercise_id, name: item.name, weight, reps: 1 } })}
             onSet={(row) => store.do({ t: 'set', row })}
             onEdit={(item) => setEditId(item.id)}
+            itemEditor={(item) => item.id === editId && <OwnItemEditor key={item.id} item={item}
+              mode={isComplex(item) ? 'complex' : 'exercise'}
+              hasResults={data.results.some((r) => r.item_id === item.id)}
+              exercises={exercises} source={profile.role} onCatalog={rememberExercise}
+              onSave={(patch) => { store.do({ t: 'edit_item', id: item.id, workout_id: w.id, patch }); setEditId(null) }}
+              onClose={() => setEditId(null)} />}
             onDelete={(item) => {
               if (!item) {
                 if (confirm(`Удалить тренировку «${w.title || 'Тренировка'}» и все её подходы?`)) store.do({ t: 'delete_workout', id: w.id })
@@ -110,17 +115,11 @@ export function Today({ profile, date: routeDate }: { profile: Profile; date?: s
               t: 'comment',
               row: { id, workout_id: w.id, item_id, author_id: profile.id, text, created_at: new Date().toISOString() },
             })} />
-          {editable && (editing
-            ? <OwnItemEditor key={editing.id} item={editing} mode={isComplex(editing) ? 'complex' : 'exercise'}
-                hasResults={data.results.some((r) => r.item_id === editing.id)}
-                exercises={exercises} source={profile.role} onCatalog={rememberExercise}
-                onSave={(patch) => { store.do({ t: 'edit_item', id: editing.id, workout_id: w.id, patch }); setEditId(null) }}
-                onClose={() => setEditId(null)} />
-            : <AddOwnItem workout={w} exercises={exercises} source={profile.role} onCatalog={rememberExercise}
-                onAdd={(row) => store.do({ t: 'item', row })} />)}
+          {editable && <AddOwnItem workout={w} exercises={exercises} source={profile.role} onCatalog={rememberExercise}
+            onAdd={(row) => store.do({ t: 'item', row })} />}
           {editable && <Finish workout={w} results={data.results} onDone={() => store.do({ t: 'complete', id: w.id, at: new Date().toISOString() })} />}
         </div>
-      })}
+      ))}
 
       {editable && <AddOwnWorkout onAdd={addOwnWorkout} exercises={exercises} source={profile.role} onCatalog={rememberExercise} />}
       {freeTimer === 'setup' && <section className="card own-form">
@@ -225,8 +224,12 @@ function OwnItemEditor({ mode, item, hasResults = false, exercises, source, onCa
   return <div className="card own-form">
     <b>{item ? 'Редактировать задание' : complex ? 'Комплекс' : 'Моё упражнение'}</b>
     {!complex && <>
-      <input autoFocus type="search" aria-label="Название упражнения" placeholder="Поиск или новое название"
-        value={name} disabled={busy || hasResults} onChange={(e) => { setName(e.target.value); setLinked(null); setError('') }} />
+      <input autoFocus type="search" aria-label="Название упражнения" placeholder={hasResults ? 'Название в тренировке' : 'Поиск или новое название'}
+        value={name} disabled={busy} onChange={(e) => {
+          setName(e.target.value)
+          if (!hasResults) setLinked(null)
+          setError('')
+        }} />
       {found.length > 0 && <div className="suggest">{found.map((e) => (
         <button key={e.id} type="button" disabled={busy} onClick={() => {
           setName(e.name)
@@ -236,7 +239,7 @@ function OwnItemEditor({ mode, item, hasResults = false, exercises, source, onCa
         }}>{e.name}</button>
       ))}</div>}
     </>}
-    <textarea autoFocus={complex || hasResults} rows={3} aria-label="Описание задания" placeholder={complex ? 'Что делать в комплексе' : 'Описание: 3×10, резина синяя'}
+    <textarea autoFocus={complex} rows={3} aria-label="Описание задания" placeholder={complex ? 'Что делать в комплексе' : 'Описание: 3×10, резина синяя'}
       value={plan} disabled={busy} onChange={(e) => setPlan(e.target.value)} />
     <div className="row">
       <select value={type} disabled={busy || hasResults} onChange={(e) => setType(e.target.value as ResultType)} aria-label="Тип результата">
@@ -249,6 +252,7 @@ function OwnItemEditor({ mode, item, hasResults = false, exercises, source, onCa
           )} />
       </label>}
     </div>
+    {hasResults && <small className="muted">Подходы сохранятся. Тип результата для записанных подходов зафиксирован.</small>}
     <fieldset disabled={busy} className="workout-fields">
       <TimerFields cfg={timer} onChange={(cfg) => {
         setTimer(cfg)

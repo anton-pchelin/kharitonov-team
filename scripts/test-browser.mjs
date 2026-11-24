@@ -286,6 +286,54 @@ for (const [name, engine] of Object.entries({ chromium, webkit })) {
         } finally { await page.context().close() }
       })
 
+      await suite.test('ранее записанные упражнения и комплексы редактируются прямо в карточке', async () => {
+        const date = new Date().toLocaleDateString('sv-SE')
+        const catalogId = 'catalog-lift'
+        const lift = { id: 'lift', position: 0, exercise_id: catalogId, name: 'Жим', result_type: 'weight_reps', planned_sets: 1,
+          plan_text: '', video_url: null, superset: null, block_note: '', self: true }
+        const complex = { ...lift, id: 'complex', position: 1, exercise_id: null, name: 'Комплекс · 3 раунда', result_type: 'check', plan_text: 'Старое описание' }
+        const items = [lift, complex]
+        const saved = []
+        const page = await visit(browser, '#/today/' + date, (endpoint, url, req) => {
+          if (endpoint === 'rpc/my_access') return { json: { coach_id: b, until: null } }
+          if (endpoint === 'workouts') return { json: [{ ...workout('Готовая тренировка', coach), self: true, date, workout_items: items }] }
+          if (endpoint === 'set_results') return { json: items.map((i) => ({
+            item_id: i.id, set_no: 1, weight: i.id === 'lift' ? 50 : null, reps: i.id === 'lift' ? 5 : null, done: true,
+            workout_items: { name: i.name, exercise_id: i.exercise_id, workouts: { date } },
+          })) }
+          if (endpoint === 'workout_items' && req.method() === 'PATCH') {
+            const id = url.searchParams.get('id')?.slice(3)
+            const patch = req.postDataJSON()
+            saved.push({ id, ...patch })
+            Object.assign(items.find((i) => i.id === id), patch)
+            return { json: [{ id }] }
+          }
+        }, true)
+        try {
+          const liftEdit = page.getByRole('button', { name: 'Редактировать «Жим»' })
+          const liftCard = page.locator('.task').filter({ has: liftEdit })
+          await liftEdit.click()
+          assert.equal(await liftCard.getByLabel('Тип результата').isDisabled(), true)
+          await liftCard.getByLabel('Название упражнения').fill('Жим лёжа')
+          const liftSaved = page.waitForResponse((r) => r.url().includes('id=eq.lift') && r.request().method() === 'PATCH')
+          await liftCard.getByRole('button', { name: 'Сохранить' }).click()
+          await liftSaved
+          assert.equal(saved[0].name, 'Жим лёжа')
+          assert.equal(saved[0].exercise_id, catalogId)
+          assert.equal(saved[0].result_type, 'weight_reps')
+          assert.equal(await page.getByLabel('кг, подход 1', { exact: true }).inputValue(), '50')
+          const complexEdit = page.getByRole('button', { name: 'Редактировать «Комплекс · 3 раунда»' })
+          const complexCard = page.locator('.task').filter({ has: complexEdit })
+          await complexEdit.click()
+          await complexCard.getByLabel('Описание задания').fill('Новое описание')
+          const complexSaved = page.waitForResponse((r) => r.url().includes('id=eq.complex') && r.request().method() === 'PATCH')
+          await complexCard.getByRole('button', { name: 'Сохранить' }).click()
+          await complexSaved
+          assert.equal(saved[1].plan_text, 'Новое описание')
+          await page.getByText('Новое описание', { exact: true }).waitFor()
+        } finally { await page.context().close() }
+      })
+
       await suite.test('свободный таймер переключается между паузой и работой', async () => {
         const currentDate = new Date().toLocaleDateString('sv-SE')
         const page = await visit(browser, '#/today/' + currentDate, (endpoint) =>
