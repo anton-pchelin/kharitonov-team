@@ -17,6 +17,8 @@ declare
   comment_id uuid := gen_random_uuid();
   exercise_id uuid := gen_random_uuid();
   prog uuid;
+  last_workout uuid;
+  last_item uuid := gen_random_uuid();
   report jsonb;
   plan jsonb := '[{"name":"Жим","result_type":"weight_reps","planned_sets":1}]';
 begin
@@ -66,6 +68,18 @@ begin
     assert false, 'тренер записал данные чужому атлету';
   exception when insufficient_privilege then null;
   end;
+
+  -- Удаление последней позиции оставляет тренировку и историю атлета.
+  last_workout := public.save_workout(jsonb_build_object('athlete_id', a, 'date', target_week + 4, 'title', 'Последнее задание'),
+    jsonb_build_array(jsonb_build_object('id',last_item,'position',0,'name','Жим','result_type','weight_reps','planned_sets',1)));
+  perform set_config('role','none',true);
+  insert into public.set_results (item_id,set_no,athlete_id,weight,reps) values (last_item,1,a,55,10);
+  perform set_config('role','authenticated',true);
+  perform public.save_workout(jsonb_build_object('id',last_workout,'athlete_id',a,'date',target_week+4,'title','Последнее задание'), '[]');
+  assert exists (select 1 from public.workout_items where id=last_item and self), 'последнее задание с историей не сохранено';
+  assert exists (select 1 from public.set_results where item_id=last_item), 'удалены подходы последнего задания';
+  perform public.save_workout(jsonb_build_object('id',last_workout,'athlete_id',a,'date',target_week+4,'title','Последнее задание'), '[]');
+  assert exists (select 1 from public.workout_items where id=last_item and self), 'повтор сохранил тренировку с потерей истории';
 
   -- Повтор после потерянного ответа использует тот же первичный ключ.
   insert into public.comments (id,workout_id,item_id,text) values (comment_id,with_history,item,'История') on conflict (id) do nothing;

@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { readTimerSettings, timerCues, timerLabel, timerState, type Cue, type TimerCfg, type TimerSettings, type TimerState } from '../lib/timer'
+import { createTimer, prepSeconds, readTimerSettings, timerLabel, type Cue, type TimerCfg, type TimerSettings, type TimerState } from '../lib/timer'
 import { fmtTime } from '../lib/format'
 import { Markup } from '../lib/markup'
 
-type Saved = { start: number; rounds: number; finish?: number }
+type Saved = { start: number; rounds: number; finish?: number; pausedAt?: number; config?: string }
 
 /** Насыщенный (прямоугольный) тон: в браузере громче системной громкости не сделать, поэтому не тихий синус. */
 function tone(ctx: AudioContext | null, volume: number, freq: number, dur: number, delay = 0) {
@@ -47,21 +47,29 @@ export function playCue(cue: Cue, s: TimerSettings, ctx: AudioContext | null) {
 /** Большой экран таймера. Старт хранится в телефоне — после блокировки или перезапуска время верное. */
 export function Timer({ id, cfg, title, task = '', onClose, onResult }: {
   id: string; cfg: TimerCfg; title: string; task?: string; onClose: () => void
-  onResult: (r: { rounds?: number; time_sec?: number; done: boolean }) => void
+  onResult?: (r: { rounds?: number; time_sec?: number; done: boolean }) => void
 }) {
   const key = `timer:${id}`
-  const read = (): Saved | null => { try { return JSON.parse(localStorage.getItem(key) ?? '') } catch { return null } }
-  const [saved, setSaved] = useState<Saved | null>(read)
+  const config = JSON.stringify(cfg)
+  const read = (): Saved | null => {
+    try {
+      const state: Saved | null = JSON.parse(localStorage.getItem(key) ?? 'null')
+      return state && (!state.config || state.config === config) ? state : null
+    } catch { return null }
+  }
+  const [saved, setSaved] = useState<Saved | null>(() => onResult ? read() : null)
   const [now, setNow] = useState(Date.now())
   const audio = useRef<AudioContext | null>(null)
   const last = useRef<string>('')
   const heard = useRef(-1)  // секунда последнего прозвучавшего сигнала
   const settings = useMemo(readTimerSettings, [])
-  const cues = useMemo(() => timerCues(cfg, settings), [cfg, settings])
+  const clock = useMemo(() => createTimer(cfg), [cfg])
+  const cues = useMemo(() => clock.cues(settings), [clock, settings])
   const [sheet, setSheet] = useState(false)
 
   const save = (s: Saved | null) => {
     setSaved(s)
+    if (!onResult) return
     if (s) localStorage.setItem(key, JSON.stringify(s))
     else localStorage.removeItem(key)
   }
@@ -75,12 +83,12 @@ export function Timer({ id, cfg, title, task = '', onClose, onResult }: {
     return () => { clearInterval(t); lock?.release().catch(() => {}) }
   }, [])
 
-  const st: TimerState | null = saved ? timerState(cfg, (saved.finish ?? now) - saved.start) : null
+  const st: TimerState | null = saved ? clock.state((saved.finish ?? saved.pausedAt ?? now) - saved.start) : null
   const done = !!saved?.finish || st?.phase === 'done'
 
   // «3-2-1» перед стартом — короткие писки
   useEffect(() => {
-    if (st?.phase !== 'countdown') return
+    if (st?.phase !== 'countdown' || saved?.pausedAt) return
     const mark = String(st.left)
     if (mark === last.current) return
     last.current = mark
@@ -89,7 +97,7 @@ export function Timer({ id, cfg, title, task = '', onClose, onResult }: {
   })
   // сигналы по расписанию; отставшие больше чем на 2 с (экран был заблокирован, перезапуск) не догоняем
   useEffect(() => {
-    if (!st || st.phase === 'countdown' || saved?.finish) return
+    if (!st || st.phase === 'countdown' || saved?.finish || saved?.pausedAt) return
     const t = st.elapsed
     const due = cues.filter(([at]) => at > heard.current && at <= t)
     if (!due.length) return
@@ -99,14 +107,20 @@ export function Timer({ id, cfg, title, task = '', onClose, onResult }: {
   })
 
   const start = () => {
-    audio.current ??= new AudioContext()  // звук разрешён только после нажатия
+    if (typeof AudioContext !== 'undefined') {
+      audio.current ??= new AudioContext()
+      void audio.current.resume().catch(() => {})
+    }
     if (typeof speechSynthesis !== 'undefined') speechSynthesis.speak(new SpeechSynthesisUtterance(''))  // iPhone: голос тоже только после нажатия
     heard.current = -1
-    save({ start: Date.now(), rounds: 0 })
+    last.current = ''
+    const start = Date.now()
+    setNow(start)
+    save({ start, rounds: 0, config })
   }
   const result = () => {
     if (!saved || !st) return
-    onResult(cfg.kind === 'amrap' ? { rounds: saved.rounds, done: true }
+    onResult?.(cfg.kind === 'amrap' ? { rounds: saved.rounds, done: true }
       : cfg.kind === 'fortime' ? { time_sec: Math.round(st.elapsed), done: true }
         : { done: true })
     save(null)
@@ -120,26 +134,38 @@ export function Timer({ id, cfg, title, task = '', onClose, onResult }: {
         <button className="back" onClick={onClose} aria-label="Закрыть таймер">✕</button>
       </div>
       <div className={'timer-face ' + (st?.phase ?? '') + (task && settings.view === 'sheet' ? ' large' : '')}>
-        {!st && <span className="timer-big">{cfg.kind === 'tabata' ? `${cfg.work ?? 20}/${cfg.rest ?? 10}` : `${cfg.minutes ?? 10}:00`}</span>}
+        {!st && <span className="timer-big">{fmtTime(cfg.kind === 'fortime' ? 0 : clock.state(1000 * prepSeconds(cfg)).left)}</span>}
         {st?.phase === 'countdown' && <span className="timer-big">{st.left}</span>}
         {st && st.phase !== 'countdown' && (
           <>
-            <span className="timer-phase">{done ? 'Готово' : st.phase === 'rest' ? 'Отдых' : 'Работа'}</span>
+            <span className="timer-phase">{done ? 'Готово' : saved?.pausedAt ? 'Пауза' : st.phase === 'rest' ? 'Отдых' : 'Работа'}</span>
             <span className="timer-big">{fmtTime(Math.max(0, Math.round(cfg.kind === 'fortime' ? st.elapsed : st.left)))}</span>
-            {st.rounds > 0 && <span className="timer-phase">Раунд {Math.min(st.round, st.rounds)} из {st.rounds}</span>}
+            {!!st.blocks && st.blocks > 1 && <span className="timer-phase">Блок {st.block} из {st.blocks}</span>}
+            {st.round > 0 && <span className="timer-phase">Раунд {st.round} из {st.rounds}</span>}
           </>
         )}
       </div>
       {task && settings.view === 'under' && <div className="card timer-task"><b>Задание</b><Markup text={task} /></div>}
       {cfg.kind === 'amrap' && saved && <p className="timer-rounds">Кругов: <b>{saved.rounds}</b></p>}
       {!saved && <button className="btn timer-btn" onClick={start}>▶ Старт</button>}
-      {saved && !done && cfg.kind === 'amrap' && st?.phase === 'work' && (
+      {saved && !saved.pausedAt && !done && cfg.kind === 'amrap' && st?.phase === 'work' && (
         <button className="btn timer-btn" onClick={() => save({ ...saved, rounds: saved.rounds + 1 })}>+ круг</button>
       )}
       {saved && !done && cfg.kind === 'fortime' && st?.phase === 'work' && (
-        <button className="btn timer-btn" onClick={() => { playCue('finish', settings, audio.current); save({ ...saved, finish: Date.now() }) }}>Финиш</button>
+        <button className="btn timer-btn" onClick={() => { playCue('finish', settings, audio.current); save({ ...saved, finish: saved.pausedAt ?? Date.now() }) }}>Финиш</button>
       )}
-      {done && <button className="btn timer-btn" onClick={result}>Записать в задание</button>}
+      {saved && !done && <button className="btn secondary" onClick={() => {
+        const at = Date.now()
+        setNow(at)
+        if (saved.pausedAt) {
+          void audio.current?.resume().catch(() => {})
+          save({ ...saved, start: saved.start + at - saved.pausedAt, pausedAt: undefined })
+        } else {
+          if (typeof speechSynthesis !== 'undefined') speechSynthesis.cancel()
+          save({ ...saved, pausedAt: at })
+        }
+      }}>{saved.pausedAt ? 'Продолжить' : 'Пауза'}</button>}
+      {done && <button className="btn timer-btn" onClick={result}>{onResult ? 'Записать в задание' : 'Готово'}</button>}
       {saved && <button className="btn secondary" onClick={() => { if (confirm('Сбросить таймер?')) save(null) }}>Сбросить</button>}
       {task && settings.view === 'sheet' && (sheet
         ? <div className="timer-sheet card"><button className="btn secondary" onClick={() => setSheet(false)}>▼ Скрыть</button><b>Задание</b><Markup text={task} /></div>

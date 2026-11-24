@@ -140,6 +140,7 @@ function PlanWeek({ athlete, athletes, monday, open, me, exercises }: {
   if (!workouts && failure) return <LoadError screen="План" cause={failure.cause} message="Не удалось загрузить неделю" onRetry={reload} />
   if (!workouts) return <p className="muted">Загрузка…</p>
 
+  const viewedWorkout = workouts.find((w) => w.id === viewing)
   return (
     <>
       {failure && <LoadError screen="План" cause={failure.cause} message="Не удалось обновить неделю" onRetry={reload} />}
@@ -189,10 +190,14 @@ function PlanWeek({ athlete, athletes, monday, open, me, exercises }: {
         </section>
       )}
 
-      {viewing && workouts.some((w) => w.id === viewing) && (
+      {viewedWorkout && viewing && (
         <section className="editor card" key={viewing} ref={toTop}>
           <div className="row-between"><b>Результаты — {athlete.name}</b><button className="back" onClick={() => setViewing(null)}>✕</button></div>
-          <WorkoutView workout={workouts.find((w) => w.id === viewing)!} results={results} comments={comments} history={history}
+          {!viewedWorkout.self && <button className="btn small secondary" onClick={() => {
+            setViewing(null)
+            setEditing({ date: viewedWorkout.date, workout: viewedWorkout })
+          }}>Редактировать тренировку</button>}
+          <WorkoutView workout={viewedWorkout} results={results} comments={comments} history={history}
             me={me.id} names={{ [me.id]: me.name, [athlete.id]: athlete.name }} editable={false}
             onComment={async (itemId, text, id) => {
               await sendCoachComment(viewing, itemId, text, id)

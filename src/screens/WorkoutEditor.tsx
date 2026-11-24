@@ -2,11 +2,11 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { DndContext, PointerSensor, KeyboardSensor, closestCenter, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core'
 import { SortableContext, arrayMove, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
-import { supabase } from '../supabase'
+import { createCatalogExercise, supabase } from '../supabase'
 import { searchExercises, type Exercise } from '../search'
 import { fmtDay, mondayOf } from '../lib/dates'
 import { COMPLEX_RESULTS, RESULT_TYPES, appendItems, complexName, complexRounds, isComplex, isGroupStart, itemLabels, type ResultType, type Workout, type WorkoutItem } from '../lib/workout'
-import { TIMER_KINDS, type TimerCfg } from '../lib/timer'
+import { TimerFields } from './TimerFields'
 import { PickWorkout } from './WeekTools'
 import { draftKey, readDraft, type Draft } from '../lib/workoutDraft'
 import { DiagnosticButton, recordFailure } from '../lib/diagnostics'
@@ -149,7 +149,7 @@ export function WorkoutEditor({ athleteId, athleteName = '', date = '', workout,
   }
 
   const save = async () => {
-    if (!items.length) return setError('Добавьте хотя бы одно задание')
+    if (!items.length && !workout) return setError('Добавьте хотя бы одно задание')
     if (items.some((i) => !i.name.trim())) return setError('У каждого задания должно быть название')
     setBusy(true)
     setError('')
@@ -279,24 +279,11 @@ function ItemRow({ item, label, groupStart, inGroup, hasNext, onChange, onMenu }
       </div>
       <label>Описание задания
       <textarea ref={plan} className="plan-text" rows={6} placeholder={complex ? 'Что делать: 10 подтягиваний, 15 приседов, 200 м бег' : 'Текст плана'} value={item.plan_text} onChange={(e) => onChange({ plan_text: e.target.value })} /></label>
-      <div className="row timer-row">
-        <select value={item.timer?.kind ?? ''} aria-label="Таймер комплекса" onChange={(e) => {
-          const kind = e.target.value as TimerCfg['kind'] | ''
-          // таймер сам подставит результат: круги для АМРАП, время для «на время»
-          onChange(kind ? { timer: kind === 'tabata' ? { kind, work: 20, rest: 10, rounds: 8 } : { kind, minutes: item.timer?.minutes ?? 12 },
-            ...(kind === 'amrap' ? { result_type: 'rounds' as const, ...(complex && { name: complexName(null) }) } : kind === 'fortime' ? { result_type: 'time' as const } : {}) } : { timer: null })
-        }}>
-          <option value="">без таймера</option>
-          {TIMER_KINDS.map(([k, l]) => <option key={k} value={k}>Таймер: {l}</option>)}
-        </select>
-        {item.timer && item.timer.kind !== 'tabata' && (
-          <label className="pct-input">
-            <input inputMode="numeric" value={item.timer.minutes ?? ''} aria-label="Минут"
-              onChange={(e) => onChange({ timer: { ...item.timer!, minutes: Number(e.target.value) || undefined } })} />
-            <span className="muted">мин</span>
-          </label>
-        )}
-      </div>
+      <TimerFields cfg={item.timer} onChange={(timer) => onChange({
+        timer,
+        ...(complex && timer?.kind !== item.timer?.kind && timer?.kind === 'amrap' ? { result_type: 'rounds', name: complexName(null) }
+          : complex && timer?.kind !== item.timer?.kind && timer?.kind === 'fortime' ? { result_type: 'time', name: complexName(rounds) } : {}),
+      })} />
       <input type="url" inputMode="url" placeholder="Видео: ссылка Rutube / VK / YouTube" value={item.video_url ?? ''}
         onChange={(e) => onChange({ video_url: e.target.value || null })} />
       {complex ? (
@@ -376,10 +363,9 @@ function AddItem({ athleteId, exercises, onAdd }: { athleteId?: string; exercise
     setBusy(true)
     setError(false)
     try {
-      const { error } = await supabase.from('exercises').upsert({ id, name, source: 'coach' }, { ignoreDuplicates: true })
-      if (error) throw error
+      const exercise = await createCatalogExercise(id, name, 'coach')
       pending.current.delete(name)
-      setAdded((previous) => [...previous, { id, name, aliases: [], muscles: [], equipment: null, image_url: null, video_url: null, source: 'coach' }])
+      setAdded((previous) => [...previous, exercise])
       pick({ name, exercise_id: id, plan_text: '', video_url: null, result_type: 'weight_reps', planned_sets: 3 })
     } catch (cause) {
       recordFailure('Редактор тренировки', 'Добавление упражнения', cause)
