@@ -3,7 +3,7 @@ import { DndContext, PointerSensor, KeyboardSensor, closestCenter, useSensor, us
 import { SortableContext, arrayMove, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import { createCatalogExercise, supabase } from '../supabase'
-import { searchExercises, type Exercise } from '../search'
+import { exactExercise, searchExercises, type Exercise } from '../search'
 import { fmtDay, mondayOf } from '../lib/dates'
 import { COMPLEX_RESULTS, RESULT_TYPES, appendItems, complexName, complexRounds, isComplex, isGroupStart, itemLabels, type ResultType, type Workout, type WorkoutItem } from '../lib/workout'
 import { TimerFields } from './TimerFields'
@@ -347,12 +347,14 @@ function AddItem({ athleteId, exercises, onAdd }: { athleteId?: string; exercise
     supabase.from('item_templates').select('*').order('name').then(({ data }) => setTemplates((data ?? []) as Template[]))
   }, [athleteId])
 
+  const catalog = [...added, ...exercises]
+  const matchInCatalog = q.trim() ? exactExercise(catalog, q) : undefined
   const words = norm(q).split(/\s+/).filter(Boolean)
   const match = (name: string) => words.every((w) => norm(name).includes(w))
   const found = words.length ? {
     history: history.filter((h) => match(h.name)).slice(0, 5),
     templates: templates.filter((t) => match(t.name)).slice(0, 5),
-    base: searchExercises([...added, ...exercises], q).slice(0, 8),
+    base: searchExercises(catalog, q).slice(0, 8),
   } : null
 
   const pick = (s: Suggestion) => { onAdd(s); setQ('') }
@@ -394,7 +396,7 @@ function AddItem({ athleteId, exercises, onAdd }: { athleteId?: string; exercise
               {e.name}
             </button>
           ))}
-          <button onClick={addNew}>{busy ? 'Добавляю…' : '+ Новое упражнение «' + q.trim() + '»'}</button>
+          {!matchInCatalog && <button onClick={addNew}>{busy ? 'Добавляю…' : '+ Новое упражнение «' + q.trim() + '»'}</button>}
         </fieldset>
       )}
       {error && <><p className="error" role="alert">Не удалось добавить упражнение. Проверьте связь и повторите.</p><DiagnosticButton /></>}

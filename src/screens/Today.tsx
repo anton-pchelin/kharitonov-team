@@ -1,6 +1,6 @@
 import { useEffect, useState, useSyncExternalStore } from 'react'
 import { createCatalogExercise, supabase, type Profile } from '../supabase'
-import { searchExercises, type Exercise } from '../search'
+import { exactExercise, searchExercises, type Exercise } from '../search'
 import { loadExercises } from './Exercises'
 import { WorkoutView, progress } from './WorkoutView'
 import { OfflineStore, type ItemEdit } from '../lib/offline'
@@ -90,6 +90,7 @@ export function Today({ profile, date: routeDate }: { profile: Profile; date?: s
             onMax={(item, weight) => store.do({ t: 'record', row: { id: crypto.randomUUID(), athlete_id: profile.id, exercise_id: item.exercise_id, name: item.name, weight, reps: 1 } })}
             onSet={(row) => store.do({ t: 'set', row })}
             onEdit={(item) => setEditId(item.id)}
+            onReorder={(item_ids) => store.do({ t: 'reorder_items', workout_id: w.id, item_ids })}
             itemEditor={(item) => item.id === editId && <OwnItemEditor key={item.id} item={item}
               mode={isComplex(item) ? 'complex' : 'exercise'}
               hasResults={data.results.some((r) => r.item_id === item.id)}
@@ -195,12 +196,13 @@ function OwnItemEditor({ mode, item, hasResults = false, exercises, source, onCa
   const [error, setError] = useState('')
   const [pending] = useState(() => new Map<string, string>())
   const input = name.trim()
+  const match = !complex && !hasResults && input ? exactExercise(exercises, input) : undefined
   const found = input && !linked && !complex && !hasResults ? searchExercises(exercises, input).slice(0, 6) : []
 
   const save = async (inCatalog: boolean) => {
     if (busy || (complex ? !plan.trim() : !input)) return
-    let exercise_id = linked
-    if (inCatalog && !linked) {
+    let exercise_id = linked ?? match?.id ?? null
+    if (inCatalog && !exercise_id) {
       if (!navigator.onLine) { setError('Чтобы добавить упражнение в базу, нужен интернет.'); return }
       const id = pending.get(input) ?? crypto.randomUUID()
       pending.set(input, id)
@@ -262,10 +264,10 @@ function OwnItemEditor({ mode, item, hasResults = false, exercises, source, onCa
     </fieldset>
     {error && <p role="alert" className="error">{error}</p>}
     <div className="row">
-      {!complex && !linked && !hasResults && <button type="button" className="btn" disabled={busy || !input}
+      {!complex && !linked && !match && !hasResults && <button type="button" className="btn" disabled={busy || !input}
         onClick={() => save(true)}>{busy ? 'Добавляю в базу…' : 'В базу и в тренировку'}</button>}
       <button type="button" className="btn secondary" disabled={busy || (complex ? !plan.trim() : !input)} onClick={() => save(false)}>
-        {item ? 'Сохранить' : !complex && !linked ? 'Только в тренировку' : 'Добавить'}
+        {item ? 'Сохранить' : !complex && !linked && !match ? 'Только в тренировку' : 'Добавить'}
       </button>
       <button type="button" className="btn secondary" disabled={busy} onClick={onClose}>Отмена</button>
     </div>

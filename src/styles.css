@@ -159,6 +159,8 @@ main:has(.week) { max-width: 1200px; }
 .task.superset { border-left: 6px solid var(--primary); }
 .block-label { font-size: 0.85rem; font-weight: 700; color: var(--muted); }
 .task-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.task-head .handle { min-width: 44px; }
+.moving-task { position: relative; z-index: 1; }
 .task-name { flex: 1; }
 .row-wrap { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
 .set-row { display: flex; align-items: center; gap: 8px; padding: 4px 6px; border-radius: 12px; }

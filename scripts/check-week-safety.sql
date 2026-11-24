@@ -19,6 +19,8 @@ declare
   prog uuid;
   last_workout uuid;
   last_item uuid := gen_random_uuid();
+  item_to_move uuid := gen_random_uuid();
+  planned_item uuid := gen_random_uuid();
   report jsonb;
   plan jsonb := '[{"name":"Жим","result_type":"weight_reps","planned_sets":1}]';
 begin
@@ -80,6 +82,31 @@ begin
   assert exists (select 1 from public.set_results where item_id=last_item), 'удалены подходы последнего задания';
   perform public.save_workout(jsonb_build_object('id',last_workout,'athlete_id',a,'date',target_week+4,'title','Последнее задание'), '[]');
   assert exists (select 1 from public.workout_items where id=last_item and self), 'повтор сохранил тренировку с потерей истории';
+
+  -- Порядок своих заданий сохраняется одной операцией. Назначенное задание и результат остаются на месте.
+  insert into public.workout_items (id, workout_id, position, name, self)
+    values (item_to_move, last_workout, 1002, 'Моё упражнение', true),
+           (planned_item, last_workout, 3, 'Задание тренера', false);
+  update public.workouts set published = true where id = last_workout;
+  perform set_config('request.jwt.claims',json_build_object('sub',a,'role','authenticated')::text,true);
+  perform public.reorder_own_workout_items(last_workout, array[item_to_move,last_item]);
+  assert (select position from public.workout_items where id=item_to_move) = 1000, 'первая позиция не сохранилась';
+  assert (select position from public.workout_items where id=last_item) = 1001, 'вторая позиция не сохранилась';
+  assert exists(select 1 from public.set_results where item_id=last_item and weight=55), 'перестановка изменила подход';
+  assert (select position from public.workout_items where id=planned_item) = 3, 'перестановка изменила назначенное задание';
+  begin
+    perform public.reorder_own_workout_items(last_workout, array[last_item,last_item]);
+    assert false, 'повтор идентификатора принят';
+  exception when raise_exception then
+    if SQLERRM not like 'Список упражнений изменился%' then raise; end if;
+  end;
+  assert (select position from public.workout_items where id=last_item) = 1001, 'неполный порядок записался';
+  perform set_config('request.jwt.claims',json_build_object('sub',coach,'role','authenticated')::text,true);
+  begin
+    perform public.reorder_own_workout_items(last_workout, array[last_item,item_to_move]);
+    assert false, 'чужая перестановка принята';
+  exception when insufficient_privilege then null;
+  end;
 
   -- Повтор после потерянного ответа использует тот же первичный ключ.
   insert into public.comments (id,workout_id,item_id,text) values (comment_id,with_history,item,'История') on conflict (id) do nothing;
