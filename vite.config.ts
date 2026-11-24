@@ -9,6 +9,8 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
+      injectRegister: false,
+      workbox: { skipWaiting: true, clientsClaim: true },
       includeAssets: ['icons/apple-touch-icon.png'],
       manifest: {
         name: 'Kharitonov team',
