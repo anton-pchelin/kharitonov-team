@@ -7,6 +7,7 @@ import { exactExercise, searchExercises, type Exercise } from '../search'
 import { fmtDay, mondayOf } from '../lib/dates'
 import { COMPLEX_RESULTS, RESULT_TYPES, appendItems, complexName, complexRounds, isComplex, isGroupStart, itemLabels, type ResultType, type Workout, type WorkoutItem } from '../lib/workout'
 import { TimerFields } from './TimerFields'
+import { RequestTimeout, withDeadline } from '../lib/request'
 import { PickWorkout } from './WeekTools'
 import { draftKey, readDraft, type Draft } from '../lib/workoutDraft'
 import { DiagnosticButton, recordFailure } from '../lib/diagnostics'
@@ -53,7 +54,7 @@ export function WorkoutEditor({ athleteId, athleteName = '', date = '', workout,
   workout: Workout | null
   template?: { title: string; prescription: string; items: Partial<WorkoutItem>[] }  // «Из шаблона» / день программы
   heading?: string
-  save?: (d: Draft, id: string) => Promise<string | null>
+  save?: (d: Draft, id: string, signal: AbortSignal) => Promise<string | null>
   draftScope: readonly (string | number)[]
   existingId?: string
   exercises: Exercise[]
@@ -79,6 +80,9 @@ export function WorkoutEditor({ athleteId, athleteName = '', date = '', workout,
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const [picking, setPicking] = useState(false)
+  const [newComplex, setNewComplex] = useState<string | null>(null)
+  const errorText = useRef<HTMLParagraphElement>(null)
+  useEffect(() => { if (error) errorText.current?.scrollIntoView({ block: 'nearest' }) }, [error])
   const box = useRef<HTMLElement>(null)
   useEffect(() => { box.current?.scrollIntoView({ block: 'start' }) }, [])  // на телефоне редактор ниже всей недели
   const dirty = JSON.stringify({ title, prescription, published, items }) !== JSON.stringify(initial)
@@ -148,6 +152,12 @@ export function WorkoutEditor({ athleteId, athleteName = '', date = '', workout,
     },
   }
 
+  const addComplex = () => {
+    const item = blank({ name: complexName(5), result_type: 'time', planned_sets: 1 }, items.length)
+    setItems((list) => [...list, item])
+    setNewComplex(item.id)
+  }
+
   const save = async () => {
     if (!items.length && !workout) return setError('Добавьте хотя бы одно задание')
     if (items.some((i) => !i.name.trim())) return setError('У каждого задания должно быть название')
@@ -155,21 +165,25 @@ export function WorkoutEditor({ athleteId, athleteName = '', date = '', workout,
     setError('')
     const clean = items.map((i, position) => ({ ...i, position, name: i.name.trim() }))
     try {
-      if (saveOverride) {
-        const error = await saveOverride({ title: title.trim(), prescription, published, items: clean }, id)
-        if (error) throw new Error(error)
-      } else {
-        const { error } = await supabase.rpc('save_workout', {
-          w: { id, athlete_id: athleteId, date: workout?.date ?? date, title: title.trim(), prescription, published },
-          items: clean,
-        })
-        if (error) throw error
-      }
+      await withDeadline(async (signal) => {
+        if (saveOverride) {
+          const error = await saveOverride({ title: title.trim(), prescription, published, items: clean }, id, signal)
+          if (error) throw new Error(error)
+        } else {
+          const { error } = await supabase.rpc('save_workout', {
+            w: { id, athlete_id: athleteId, date: workout?.date ?? date, title: title.trim(), prescription, published },
+            items: clean,
+          }).abortSignal(signal)
+          if (error) throw error
+        }
+      })
       deleteDraft()
       onSaved()
     } catch (cause) {
       recordFailure('Редактор тренировки', 'Сохранение', cause)
-      setError('Не сохранилось. Проверьте связь и повторите.')
+      setError(cause instanceof RequestTimeout
+        ? 'Не сохранилось. Сервер не ответил за 20 секунд. Нажмите «Сохранить» ещё раз.'
+        : 'Не сохранилось. Проверьте связь и повторите.')
     } finally {
       setBusy(false)
     }
@@ -205,7 +219,7 @@ export function WorkoutEditor({ athleteId, athleteName = '', date = '', workout,
           {items.map((it, i) => (
             <ItemRow key={it.id} item={it} label={labels[i]} groupStart={isGroupStart(items, i)}
               inGroup={labels[i].length > String(parseInt(labels[i])).length}
-              hasNext={i < items.length - 1}
+              hasNext={i < items.length - 1} revealDescription={it.id === newComplex}
               onChange={(p) => update(it.id, p)}
               onMenu={(action) => (action === 'template' ? menu.toTemplate(it) : menu[action](i))} />
           ))}
@@ -213,7 +227,7 @@ export function WorkoutEditor({ athleteId, athleteName = '', date = '', workout,
       </DndContext>
 
       <AddItem athleteId={athleteId} exercises={exercises} onAdd={(s) => setItems((l) => [...l, blank(s, l.length)])} />
-      <button className="btn secondary" onClick={() => setItems((l) => [...l, blank({ name: complexName(5), result_type: 'time', planned_sets: 1 }, l.length)])}>+ Комплекс</button>
+      <button type="button" className="btn secondary" onClick={addComplex}>+ Комплекс</button>
       {athleteId && (picking
         ? <PickWorkout athleteId={athleteId} monday={mondayOf(workout?.date ?? date)}
             onPick={(w) => { setItems((l) => appendItems(l, w.workout_items ?? [])); setPicking(false) }} onCancel={() => setPicking(false)} />
@@ -221,23 +235,27 @@ export function WorkoutEditor({ athleteId, athleteName = '', date = '', workout,
 
       </fieldset>
       {storageError && <p className="error">Не удалось записать черновик на телефон. Сохраните тренировку перед выходом.</p>}
-      {error && <><p className="error" role="alert">{error}</p><DiagnosticButton /></>}
+      {error && <><p ref={errorText} className="error" role="alert">{error}</p><DiagnosticButton /></>}
       <button className="btn" onClick={save} disabled={busy}>{busy ? 'Сохраняю…' : 'Сохранить'}</button>
     </section>
   )
 }
 
-function ItemRow({ item, label, groupStart, inGroup, hasNext, onChange, onMenu }: {
+function ItemRow({ item, label, groupStart, inGroup, hasNext, revealDescription, onChange, onMenu }: {
   item: WorkoutItem
   label: string
   groupStart: boolean
   inGroup: boolean
   hasNext: boolean
+  revealDescription: boolean
   onChange: (p: Partial<WorkoutItem>) => void
   onMenu: (a: 'superset' | 'unsuperset' | 'duplicate' | 'remove' | 'template') => void
 }) {
   const { attributes, listeners, setNodeRef, transform, transition } = useSortable({ id: item.id })
   const plan = useRef<HTMLTextAreaElement>(null)
+  useEffect(() => {
+    if (revealDescription) plan.current?.scrollIntoView({ block: 'center' })
+  }, [revealDescription])
   const wrap = (mark: string) => {
     const t = plan.current
     if (!t) return

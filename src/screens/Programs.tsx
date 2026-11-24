@@ -103,9 +103,9 @@ function ProgramEditor({ id, coachId }: { id: string; coachId: string }) {
     <LoadError screen="Программа" cause={failure.cause} message="Не удалось загрузить программу" onRetry={load} /></>
   if (!program) return <p className="muted">Загрузка…</p>
 
-  const save = (week: number, day: number) => async (d: Draft, workoutId: string) => {
+  const save = (week: number, day: number) => async (d: Draft, workoutId: string, signal: AbortSignal) => {
     const row = { id: workoutId, program_id: id, week, day, title: d.title, prescription: d.prescription, items: snapshot(d.items) }
-    const { error } = await supabase.from('program_workouts').upsert(row)
+    const { error } = await supabase.from('program_workouts').upsert(row).abortSignal(signal)
     return error?.message ?? null
   }
   const setWeeks = async (weeks: number) => {
