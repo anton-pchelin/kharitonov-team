@@ -1,11 +1,18 @@
+import { useState } from 'react'
 import { blockCount, blockRest, customPhases, defaultTimer, emomSeconds, prepSeconds, restSeconds, roundCount, TIMER_KINDS, timeLimit, workSeconds, type TimerCfg } from '../lib/timer'
 
 function TimerNumber({ label, value, min = 0, max, onChange }: {
   label: string; value: number; min?: number; max: number; onChange: (value: number) => void
 }) {
+  const [empty, setEmpty] = useState(false)
   return <label>{label}
-    <input type="number" inputMode="numeric" min={min} max={max} value={value}
-      onChange={(e) => onChange(Math.min(max, Math.max(min, Math.round(Number(e.target.value)) || 0)))} />
+    <input type="number" inputMode="numeric" min={min} max={max} value={empty ? '' : value}
+      onBlur={() => setEmpty(false)}
+      onChange={(e) => {
+        const text = e.currentTarget.value
+        setEmpty(text === '')
+        if (text !== '') onChange(Math.min(max, Math.max(min, Math.round(Number(text)) || 0)))
+      }} />
   </label>
 }
 
