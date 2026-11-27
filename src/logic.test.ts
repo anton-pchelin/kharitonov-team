@@ -320,12 +320,20 @@ describe('кардио', async () => {
 
 describe('комплекс', () => {
   it('название из числа раундов и обратно', async () => {
-    const { complexName, complexRounds, isComplex } = await import('./lib/workout')
-    expect([1, 2, 5, 11, 21, 22, 112].map(complexName)).toEqual(['Комплекс · 1 раунд', 'Комплекс · 2 раунда', 'Комплекс · 5 раундов',
+    const { complexName, complexRounds, complexTitle, isComplex } = await import('./lib/workout')
+    expect([1, 2, 5, 11, 21, 22, 112].map((rounds) => complexName(rounds))).toEqual(['Комплекс · 1 раунд', 'Комплекс · 2 раунда', 'Комплекс · 5 раундов',
       'Комплекс · 11 раундов', 'Комплекс · 21 раунд', 'Комплекс · 22 раунда', 'Комплекс · 112 раундов'])
     expect(complexName(null)).toBe('Комплекс')
     expect(complexRounds('Комплекс · 7 раундов')).toBe(7)
     expect(complexRounds('Комплекс')).toBeNull()
+    expect(complexTitle('Комплекс · 7 раундов')).toBe('')
+    for (const rounds of [3, null]) {
+      const title = 'Финиш · 12 раундов'
+      const name = complexName(rounds, title)
+      expect(isComplex({ name, exercise_id: null })).toBe(true)
+      expect(complexTitle(name)).toBe(title)
+      expect(complexRounds(name)).toBe(rounds)
+    }
     expect(isComplex({ name: 'Комплекс · 3 раунда', exercise_id: null })).toBe(true)
     expect(isComplex({ name: 'Комплексная разминка', exercise_id: null })).toBe(false)
     expect(isComplex({ name: 'Комплекс', exercise_id: 'x' })).toBe(false)

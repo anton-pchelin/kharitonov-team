@@ -7,7 +7,7 @@ import { supabase } from '../supabase'
 import { Markup } from '../lib/markup'
 import { Video } from '../lib/video'
 import { fmtNum, fmtTime, parseNum, parseTime } from '../lib/format'
-import { isComplex, itemLabels, resultLabel, type ResultType, type Workout, type WorkoutItem } from '../lib/workout'
+import { MAX_RESULT_ROWS, complexPerRound, complexRounds, complexTimerRounds, isComplex, itemLabels, resultLabel, type ResultType, type Workout, type WorkoutItem } from '../lib/workout'
 import { previousSets, type Comment, type PastSet, type SetResult } from '../lib/offline'
 import { exerciseKey, isRecordSet, matchSet, maxFor, pctWeight, type MaxRecord } from '../lib/progress'
 import { platesFor } from '../lib/plates'
@@ -42,7 +42,14 @@ const FIELDS: Record<ResultType, Field[]> = {
 }
 const UNIT: Record<Field, string> = { weight: 'кг', reps: 'повт', time_sec: 'мм:сс', meters: 'м', calories: 'ккал', rounds: 'кругов', hr: 'пульс' }
 const show = (f: Field, v: number | null | undefined) => (f === 'time_sec' ? fmtTime(v) : fmtNum(v))
-const parse = (f: Field, s: string) => (f === 'time_sec' ? parseTime(s) : f === 'reps' || f === 'rounds' || f === 'hr' ? (parseNum(s) == null ? null : Math.round(parseNum(s)!)) : parseNum(s))
+function parse(f: Field, text: string) {
+  if (f === 'time_sec') {
+    const [minutes, seconds] = text.split(':')
+    return minutes || seconds ? parseTime(`${minutes || '0'}:${seconds || '0'}`) : null
+  }
+  const value = parseNum(text)
+  return value != null && (f === 'reps' || f === 'rounds' || f === 'hr') ? Math.round(value) : value
+}
 
 /** Сколько заданий сделано: у задания есть хотя бы один отмеченный или заполненный подход. */
 export function progress(items: WorkoutItem[], results: SetResult[]) {
@@ -126,8 +133,11 @@ function ItemView(p: ViewProps & { item: WorkoutItem; label: string; note: strin
   const mine = p.results.filter((r) => r.item_id === item.id)
   const prev = previousSets(p.history, item, p.workout.date)
   const earlier = p.history.filter((h) => h.date < p.workout.date && exerciseKey(h) === exerciseKey(item))
-  const [extraRows, setExtraRows] = useState(0)
-  const rows = Math.max(item.result_type === 'check' ? 1 : item.planned_sets, ...mine.map((r) => r.set_no), 1) + extraRows
+  const [visibleRows, setVisibleRows] = useState(0)
+  const complex = isComplex(item)
+  const perRound = complex && complexPerRound(item.result_type)
+  const planned = perRound ? complexTimerRounds(item.timer) ?? complexRounds(item.name) ?? item.planned_sets : item.planned_sets
+  const rows = Math.min(MAX_RESULT_ROWS, Math.max(planned, ...mine.map((r) => r.set_no), visibleRows, 1))
 
   const put = (setNo: number, patch: Partial<SetResult>) => {
     const cur = mine.find((r) => r.set_no === setNo) ?? { item_id: item.id, set_no: setNo, done: false }
@@ -144,7 +154,7 @@ function ItemView(p: ViewProps & { item: WorkoutItem; label: string; note: strin
             onClick={() => put(1, { done: !mine[0]?.done })}>✓</button>
         ) : <b className="item-label">{p.label}</b>}
         <b className="task-name">{item.name}</b>
-        {item.result_type !== 'check' && <span className="muted">{isComplex(item) ? '' : `${item.planned_sets}× `}{resultLabel(item.result_type)}</span>}
+        {item.result_type !== 'check' && <span className="muted">{complex ? '' : `${item.planned_sets}× `}{resultLabel(item.result_type)}</span>}
 
       </div>
       {item.pct != null && <PctHint {...p} item={item} />}
@@ -159,7 +169,7 @@ function ItemView(p: ViewProps & { item: WorkoutItem; label: string; note: strin
         {p.extra?.(item)}
       </div>
       {item.result_type !== 'check' && Array.from({ length: rows }, (_, k) => k + 1).map((n) => (
-        <SetRow key={n} n={n} type={item.result_type} value={mine.find((r) => r.set_no === n)} hint={prev.find((r) => r.set_no === n)}
+        <SetRow key={n} n={n} perRound={perRound} type={item.result_type} value={mine.find((r) => r.set_no === n)} hint={prev.find((r) => r.set_no === n)}
           record={isRecordSet(mine.find((r) => r.set_no === n)?.weight, mine.find((r) => r.set_no === n)?.reps, earlier)}
           gym={p.gym} pctKg={item.pct != null && p.maxes ? (() => { const m = maxFor(item, p.history, p.maxes); return m ? pctWeight(item.pct, m) : null })() : null}
           editable={p.editable} onPut={(patch) => put(n, patch)} />
@@ -171,8 +181,8 @@ function ItemView(p: ViewProps & { item: WorkoutItem; label: string; note: strin
       {item.result_type !== 'check' && prev.length > 0 && (
         <small className="muted">прошлый раз: {prev.map((s) => FIELDS[item.result_type].map((f) => show(f, s[f])).filter(Boolean).join(item.result_type === 'cardio' ? ' · ' : '×')).join(', ')}</small>
       )}
-      {p.editable && item.result_type !== 'check' && (
-        <button className="link-btn" onClick={() => setExtraRows(extraRows + 1)}>+ подход</button>
+      {p.editable && item.result_type !== 'check' && rows < MAX_RESULT_ROWS && (
+        <button className="link-btn" onClick={() => setVisibleRows(rows + 1)}>{perRound ? '+ раунд' : '+ подход'}</button>
       )}
       <Comments {...p} itemId={item.id} list={p.comments.filter((c) => c.item_id === item.id)} />
     </section>
@@ -194,13 +204,14 @@ function PctHint(p: ViewProps & { item: WorkoutItem }) {
   )
 }
 
-function SetRow({ n, type, value, hint, record, editable, onPut, gym, pctKg }: {
-  n: number; type: ResultType; value?: SetResult; hint?: SetResult; record: boolean; editable: boolean; onPut: (p: Partial<SetResult>) => void
+function SetRow({ n, perRound, type, value, hint, record, editable, onPut, gym, pctKg }: {
+  n: number; perRound: boolean; type: ResultType; value?: SetResult; hint?: SetResult; record: boolean; editable: boolean; onPut: (p: Partial<SetResult>) => void
   gym?: { bar: number; plates: number[] }; pctKg?: number | null
 }) {
   const fields = FIELDS[type]
   const [draft, setDraft] = useState<Partial<Record<Field, string>>>({})
   const [calc, setCalc] = useState(false)
+  const rowLabel = `${perRound ? 'раунд' : 'подход'} ${n}`
   const text = (f: Field) => draft[f] ?? show(f, value?.[f])
   // ерунда в кардио (0 метров, пульс 300) — подсветить; сохранять не мешаем
   const bad = (f: Field) => type === 'cardio' && value?.[f] != null && (f === 'hr' ? !hrOk(value.hr) : Number(value[f]) <= 0)
@@ -216,10 +227,13 @@ function SetRow({ n, type, value, hint, record, editable, onPut, gym, pctKg }: {
   return (
     <div className={'set-row' + (value?.done ? ' done' : '')}>
       <span className="set-no">{record ? '🏆' : n}</span>
-      {fields.map((f, i) => (
+      {fields.map((f, i) => f === 'time_sec' && editable ? (
+        <TimeInput key={f} draft={draft[f]} value={value?.[f]} hint={hint?.[f]} rowLabel={rowLabel}
+          bad={bad(f)} onChange={(t) => setDraft((d) => ({ ...d, [f]: t }))} onCommit={() => commit(f)} />
+      ) : (
         <span key={f} className="set-field">
           {i > 0 && type !== 'cardio' && <span className="muted">×</span>}
-          <input inputMode={f === 'time_sec' || f === 'hr' ? 'numeric' : 'decimal'} className={bad(f) ? 'bad' : undefined} disabled={!editable} aria-label={`${UNIT[f]}, подход ${n}`}
+          <input inputMode={f === 'reps' || f === 'rounds' || f === 'hr' ? 'numeric' : 'decimal'} className={bad(f) ? 'bad' : undefined} disabled={!editable} aria-label={`${UNIT[f]}, ${rowLabel}`}
             placeholder={(match[f] != null ? '≈ ' + show(f, match[f]) : show(f, hint?.[f])) || (f === 'weight' ? '' : UNIT[f])} value={text(f)}
             onChange={(e) => setDraft((d) => ({ ...d, [f]: e.target.value }))}
             onBlur={() => commit(f)} onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()} />
@@ -228,15 +242,37 @@ function SetRow({ n, type, value, hint, record, editable, onPut, gym, pctKg }: {
         </span>
       ))}
       {calc && gym && <Plates weight={parseNum(draft.weight ?? '') ?? value?.weight ?? match.weight ?? hint?.weight ?? pctKg ?? null} gym={gym} />}
-      <button className={'round-check' + (value?.done ? ' on' : '')} disabled={!editable} aria-label={`Подход ${n} выполнен`}
+      <button className={'round-check' + (value?.done ? ' on' : '')} disabled={!editable} aria-label={`${perRound ? 'Раунд' : 'Подход'} ${n} выполнен`}
         onClick={() => {
           // ✓ на пустом подходе берёт подсказку «прошлый раз»
-          const filled = Object.fromEntries(fields.map((f) => [f, value?.[f] ?? (draft[f] ? parse(f, draft[f]!) : match[f] ?? hint?.[f] ?? null)]))
+          const filled = Object.fromEntries(fields.map((f) => [f, draft[f] !== undefined ? parse(f, draft[f]!) : value?.[f] ?? match[f] ?? hint?.[f] ?? null]))
           onPut({ ...filled, done: !value?.done })
           setDraft({})
         }}>✓</button>
     </div>
   )
+}
+
+function TimeInput({ draft, value, hint, rowLabel, bad, onChange, onCommit }: {
+  draft?: string; value?: number | null; hint?: number | null; rowLabel: string; bad: boolean
+  onChange: (value: string) => void; onCommit: () => void
+}) {
+  const parts = (s?: number | null) => s == null ? ['', ''] : [String(Math.floor(s / 60)), String(s % 60).padStart(2, '0')]
+  const values = draft === undefined ? parts(value) : draft.split(':')
+  const placeholders = parts(hint)
+  return <span className="set-field set-time" role="group" aria-label={`Время, ${rowLabel}`}
+    onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget)) onCommit() }}>
+    {['мин', 'сек'].map((unit, i) => <label key={unit}>
+      <input inputMode="numeric" maxLength={i === 0 ? 7 : 2} className={bad ? 'bad' : undefined}
+        aria-label={`${i === 0 ? 'Минуты' : 'Секунды'}, ${rowLabel}`} value={values[i]} placeholder={placeholders[i] || '0'}
+        onChange={(e) => {
+          const v = e.target.value
+          if (!/^\d*$/.test(v)) return
+          onChange(i === 0 ? `${v}:${values[1]}` : `${values[0]}:${v}`)
+        }} onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur() }} />
+      <small className="muted">{unit}</small>
+    </label>)}
+  </span>
 }
 
 function Comments(p: ViewProps & { itemId: string | null; list: Comment[] }) {
