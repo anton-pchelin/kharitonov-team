@@ -168,6 +168,9 @@ main:has(.week) { max-width: 1200px; }
 .set-no { min-width: 20px; color: var(--muted); font-weight: 700; }
 .set-field { display: flex; align-items: center; gap: 4px; flex: 1; }
 .set-field input { min-height: 44px; padding: 8px; text-align: center; font-size: 1.05rem; }
+.set-time { flex: 2; }
+.set-time label { min-width: 0; flex: 1; }
+.set-time small { display: block; text-align: center; }
 .round-check { flex: none; width: 44px; height: 44px; border-radius: 50%; border: 2px solid var(--line); background: var(--card); color: var(--muted); font-size: 1.1rem; font-weight: 800; cursor: pointer; }
 .round-check.on { background: var(--primary); border-color: var(--primary); color: var(--on-primary); }
 .round-check:disabled { cursor: default; }

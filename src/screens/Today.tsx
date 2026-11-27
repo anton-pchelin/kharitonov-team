@@ -11,7 +11,7 @@ import { defaultTimer, type TimerCfg } from '../lib/timer'
 import type { WorkoutItem } from '../lib/workout'
 import { addDays, dayShort, fmtDay, mondayOf, parseIso, today, weekDays } from '../lib/dates'
 import { fmtNum } from '../lib/format'
-import { COMPLEX_RESULTS, RESULT_TYPES, complexName, complexRounds, isComplex, type ResultType, type Workout } from '../lib/workout'
+import { COMPLEX_RESULTS, MAX_RESULT_ROWS, RESULT_TYPES, complexName, complexPerRound, complexRounds, complexTimerRounds, complexTitle, isComplex, type ResultType, type Workout } from '../lib/workout'
 
 const stores = new Map<string, OfflineStore>()
 export const storeFor = (userId: string) => {
@@ -132,10 +132,11 @@ export function Today({ profile, date: routeDate }: { profile: Profile; date?: s
       {freeTimer === 'running' && freeConfig && <Timer id="free" cfg={freeConfig} title="Таймер" onClose={() => setFreeTimer(null)} />}
       {timer?.timer && (
         <Timer id={timer.id} cfg={timer.timer} title={timer.name} task={[timer.block_note, timer.plan_text].filter(Boolean).join('\n\n')} onClose={() => setTimer(null)}
+          manualResult={isComplex(timer) && timer.result_type !== 'check' && timer.result_type !== 'time' && !(timer.result_type === 'rounds' && timer.timer.kind === 'amrap')}
           onResult={(r) => store.do({ t: 'set', row: {
             ...data.results.find((x) => x.item_id === timer.id && x.set_no === 1), item_id: timer.id, set_no: 1, done: r.done,
             ...(timer.result_type === 'rounds' && r.rounds !== undefined ? { rounds: r.rounds } : {}),
-            ...(timer.result_type === 'time' && r.time_sec !== undefined ? { time_sec: r.time_sec } : {}),
+            ...(timer.result_type === 'time' && (isComplex(timer) || timer.timer?.kind === 'fortime') && r.time_sec !== undefined ? { time_sec: r.time_sec } : {}),
           } })} />
       )}
     </>
@@ -185,7 +186,7 @@ function OwnItemEditor({ mode, item, hasResults = false, exercises, source, onCa
   mode: ItemMode; item?: WorkoutItem; hasResults?: boolean; onSave: (patch: ItemEdit) => void; onClose: () => void
 }) {
   const complex = mode === 'complex'
-  const [name, setName] = useState(item?.name ?? '')
+  const [name, setName] = useState(complex ? complexTitle(item?.name ?? '') : item?.name ?? '')
   const [linked, setLinked] = useState(item?.exercise_id ?? null)
   const [type, setType] = useState<ResultType>(item?.result_type ?? (complex ? 'time' : 'weight_reps'))
   const [sets, setSets] = useState(item?.planned_sets ?? 3)
@@ -195,6 +196,7 @@ function OwnItemEditor({ mode, item, hasResults = false, exercises, source, onCa
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [pending] = useState(() => new Map<string, string>())
+  const timerRounds = complex && complexPerRound(type) ? complexTimerRounds(timer) : null
   const input = name.trim()
   const match = !complex && !hasResults && input ? exactExercise(exercises, input) : undefined
   const found = input && !linked && !complex && !hasResults ? searchExercises(exercises, input).slice(0, 6) : []
@@ -218,14 +220,15 @@ function OwnItemEditor({ mode, item, hasResults = false, exercises, source, onCa
       } finally { setBusy(false) }
     }
     onSave({
-      exercise_id, name: complex ? complexName(type === 'rounds' ? null : rounds) : input,
+      exercise_id, name: complex ? complexName(type === 'rounds' ? null : timerRounds ?? rounds, input) : input,
       plan_text: plan.trim(), result_type: type, planned_sets: complex || type === 'check' ? 1 : sets, timer,
     })
   }
 
   return <div className="card own-form">
     <b>{item ? 'Редактировать задание' : complex ? 'Комплекс' : 'Моё упражнение'}</b>
-    {!complex && <>
+    {complex ? <input aria-label="Название комплекса" placeholder="Название комплекса" value={name} disabled={busy}
+      onChange={(e) => setName(e.target.value)} /> : <>
       <input autoFocus type="search" aria-label="Название упражнения" placeholder={hasResults ? 'Название в тренировке' : 'Поиск или новое название'}
         value={name} disabled={busy} onChange={(e) => {
           setName(e.target.value)
@@ -247,21 +250,18 @@ function OwnItemEditor({ mode, item, hasResults = false, exercises, source, onCa
       <select value={type} disabled={busy || hasResults} onChange={(e) => setType(e.target.value as ResultType)} aria-label="Тип результата">
         {(complex ? COMPLEX_RESULTS : RESULT_TYPES).map(([k, l]) => <option key={k} value={k}>{l}</option>)}
       </select>
-      {(complex ? type !== 'rounds' : type !== 'check') && <label>{complex ? 'Раундов' : 'Подходов'}
-        <input type="number" inputMode="numeric" min={1} max={complex ? 100 : 50} disabled={busy}
+      {(complex ? type !== 'rounds' && timerRounds == null : type !== 'check') && <label>{complex ? 'Раундов' : 'Подходов'}
+        <input type="number" inputMode="numeric" min={1} max={complex ? MAX_RESULT_ROWS : 50} disabled={busy}
           value={complex ? rounds : sets} onChange={(e) => (complex ? setRounds : setSets)(
-            Math.min(complex ? 100 : 50, Math.max(1, Math.round(Number(e.target.value)) || 1))
+            Math.min(complex ? MAX_RESULT_ROWS : 50, Math.max(1, Math.round(Number(e.target.value)) || 1))
           )} />
       </label>}
     </div>
     {hasResults && <small className="muted">Подходы сохранятся. Тип результата для записанных подходов зафиксирован.</small>}
     <fieldset disabled={busy} className="workout-fields">
-      <TimerFields cfg={timer} onChange={(cfg) => {
-        setTimer(cfg)
-        if (complex && !hasResults && cfg?.kind !== timer?.kind && cfg?.kind === 'amrap') setType('rounds')
-        if (complex && !hasResults && cfg?.kind !== timer?.kind && cfg?.kind === 'fortime') setType('time')
-      }} />
+      <TimerFields cfg={timer} onChange={setTimer} />
     </fieldset>
+    {timerRounds != null && <small className="muted">Раундов для записи: {Math.min(timerRounds, MAX_RESULT_ROWS)}{timerRounds > MAX_RESULT_ROWS && ` из ${timerRounds}`}</small>}
     {error && <p role="alert" className="error">{error}</p>}
     <div className="row">
       {!complex && !linked && !match && !hasResults && <button type="button" className="btn" disabled={busy || !input}

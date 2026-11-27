@@ -170,10 +170,17 @@ for (const [name, engine] of Object.entries({ chromium, webkit })) {
             return rect && rect.top >= 0 && rect.top < window.innerHeight
           })
           await page.getByLabel('Описание задания').fill('Текст комплекса')
+          const complexTitle = page.getByRole('textbox', { name: 'Название комплекса' })
+          await complexTitle.fill('Утренний комплекс')
+          await page.getByRole('button', { name: 'Больше раундов' }).click()
           await page.reload()
           await openEditor(page)
           await page.getByRole('button', { name: 'Восстановить', exact: true }).click()
           assert.equal(await page.getByLabel('Описание задания').inputValue(), 'Текст комплекса')
+          assert.equal(await complexTitle.inputValue(), 'Утренний комплекс')
+          await page.getByLabel('Результат комплекса').selectOption('reps')
+          await page.getByLabel('Таймер', { exact: true }).selectOption('tabata')
+          await page.getByLabel('Раундов', { exact: true }).fill('6')
           await page.getByRole('button', { name: 'Сохранить', exact: true }).click()
           await page.getByRole('alert').filter({ hasText: 'Не сохранилось' }).waitFor()
           await page.getByRole('button', { name: 'Сохранить', exact: true }).click()
@@ -182,6 +189,8 @@ for (const [name, engine] of Object.entries({ chromium, webkit })) {
           assert.ok(saves[0].w.id)
           assert.deepEqual(saves[0], saves[1])
           assert.equal(saves[1].w.title, 'Вернуть после перезапуска')
+          assert.equal(saves[1].items[0].name, 'Комплекс · 6 раундов · Утренний комплекс')
+          assert.equal(saves[1].items[0].result_type, 'reps')
           await openEditor(page)
           assert.equal(await page.getByRole('button', { name: 'Восстановить', exact: true }).count(), 0)
         } finally { await page.context().close() }
@@ -369,12 +378,17 @@ for (const [name, engine] of Object.entries({ chromium, webkit })) {
           const complexEdit = page.getByRole('button', { name: 'Редактировать «Комплекс · 3 раунда»' })
           const complexCard = page.locator('.task').filter({ has: complexEdit })
           await complexEdit.click()
+          await complexCard.getByRole('textbox', { name: 'Название комплекса' }).fill('Вечерний комплекс')
           await complexCard.getByLabel('Описание задания').fill('Новое описание')
           const complexSaved = page.waitForResponse((r) => r.url().includes('id=eq.complex') && r.request().method() === 'PATCH')
           await complexCard.getByRole('button', { name: 'Сохранить' }).click()
           await complexSaved
+          assert.equal(saved[1].name, 'Комплекс · 3 раунда · Вечерний комплекс')
+          assert.equal(saved[1].result_type, 'check')
           assert.equal(saved[1].plan_text, 'Новое описание')
           await page.getByText('Новое описание', { exact: true }).waitFor()
+          await page.getByRole('button', { name: 'Редактировать «Комплекс · 3 раунда · Вечерний комплекс»' }).click()
+          assert.equal(await page.getByRole('textbox', { name: 'Название комплекса' }).inputValue(), 'Вечерний комплекс')
         } finally { await page.context().close() }
       })
 
@@ -457,27 +471,125 @@ for (const [name, engine] of Object.entries({ chromium, webkit })) {
         } finally { await page.context().close() }
       })
 
-      await suite.test('свободный таймер переключается между паузой и работой', async () => {
+      await suite.test('комплекс сохраняет отдельные повторы по раундам и время в минутах и секундах', async () => {
+        const date = new Date().toLocaleDateString('sv-SE')
+        const complex = { id: 'tabata', position: 0, exercise_id: null, name: 'Комплекс · 5 раундов', result_type: 'time', planned_sets: 1,
+          plan_text: 'Приседания', video_url: null, superset: null, block_note: '', self: true }
+        const timed = { ...complex, id: 'timed', position: 1, name: 'Бег', self: false }
+        const results = new Map()
+        const page = await visit(browser, '#/today/' + date, (endpoint, _, req) => {
+          if (endpoint === 'rpc/my_access') return { json: { coach_id: b, until: null } }
+          if (endpoint === 'workouts') return { json: [{ ...workout('Интервалы', coach), date, workout_items: [complex, timed] }] }
+          if (endpoint === 'workout_items' && req.method() === 'PATCH') {
+            Object.assign(complex, req.postDataJSON())
+            return { json: [{ id: complex.id }] }
+          }
+          if (endpoint === 'set_results') {
+            if (req.method() === 'POST') {
+              const row = req.postDataJSON()
+              results.set(`${row.item_id}:${row.set_no}`, row)
+              return { status: 201 }
+            }
+            return { json: [...results.values()].map((row) => ({ ...row,
+              workout_items: { name: row.item_id === complex.id ? complex.name : timed.name, exercise_id: null, workouts: { date } },
+            })) }
+          }
+        }, true)
+        try {
+          await page.clock.install()
+          await page.getByRole('button', { name: 'Редактировать «Комплекс · 5 раундов»' }).click()
+          const type = page.getByLabel('Тип результата')
+          await type.selectOption('rounds')
+          await type.selectOption('reps')
+          await page.getByLabel('Таймер', { exact: true }).selectOption('tabata')
+          await page.getByLabel('Раундов', { exact: true }).fill('3')
+          await page.getByLabel('Блоков', { exact: true }).fill('2')
+          await page.getByLabel('Работа · секунды').fill('1')
+          await page.getByLabel('Отдых · секунды', { exact: true }).fill('0')
+          await page.getByLabel('Отдых между блоками · минуты').fill('0')
+          await page.getByLabel('Подготовка · секунды').fill('0')
+          const saved = page.waitForResponse((r) => r.url().includes('/workout_items') && r.request().method() === 'PATCH')
+          await page.getByRole('button', { name: 'Сохранить', exact: true }).click()
+          await saved
+          assert.equal(complex.result_type, 'reps')
+          assert.equal(complex.name, 'Комплекс · 6 раундов')
+          await page.getByLabel('повт, раунд 6', { exact: true }).waitFor()
+          assert.equal(await page.getByLabel('повт, раунд 7', { exact: true }).count(), 0)
+          await page.getByRole('button', { name: '▶ Таймер' }).click()
+          await page.getByRole('button', { name: '▶ Старт' }).click()
+          await page.clock.fastForward(6500)
+          await page.getByRole('button', { name: 'К результатам' }).click()
+          assert.equal(results.size, 0)
+          for (const [round, reps] of [[1, 13], [6, 9]]) {
+            const field = page.getByLabel(`повт, раунд ${round}`, { exact: true })
+            await field.fill(String(reps))
+            const posted = page.waitForResponse((r) => r.url().includes('/set_results') && r.request().method() === 'POST')
+            await field.press('Enter')
+            await posted
+            await page.getByText('✓ отправлено', { exact: true }).waitFor()
+          }
+          const minutes = page.getByLabel('Минуты, подход 1', { exact: true })
+          const seconds = page.getByLabel('Секунды, подход 1', { exact: true })
+          await minutes.fill('2')
+          await seconds.fill('35')
+          assert.equal(results.size, 2)
+          const posted = page.waitForResponse((r) => r.url().includes('/set_results') && r.request().method() === 'POST')
+          await seconds.press('Enter')
+          await posted
+          assert.equal(results.get('tabata:1').reps, 13)
+          assert.equal(results.get('tabata:6').reps, 9)
+          assert.equal(results.get('timed:1').time_sec, 155)
+          await page.reload()
+          await page.waitForFunction(() => document.querySelector('[aria-label="повт, раунд 6"]')?.value === '9')
+          assert.equal(await minutes.inputValue(), '2')
+          assert.equal(await seconds.inputValue(), '35')
+        } finally { await page.context().close() }
+      })
+
+      await suite.test('свободный таймер удерживает экран во время работы и снимает удержание на паузе', async () => {
         const currentDate = new Date().toLocaleDateString('sv-SE')
         const page = await visit(browser, '#/today/' + currentDate, (endpoint) =>
           endpoint === 'rpc/my_access' ? { json: { coach_id: b, until: null } } : undefined, true)
         try {
           await page.clock.install()
+          await page.evaluate(() => {
+            const locks = window.testScreenLocks = []
+            Object.defineProperty(navigator, 'wakeLock', { configurable: true, value: {
+              async request(type) {
+                const lock = Object.assign(new EventTarget(), { type, released: false, async release() {
+                  this.released = true
+                  this.dispatchEvent(new Event('release'))
+                } })
+                locks.push(lock)
+                return lock
+              },
+            } })
+          })
           await page.getByRole('button', { name: 'Свободный таймер', exact: true }).click()
           await page.getByLabel('Подготовка · секунды').fill('0')
           await page.getByRole('button', { name: 'Открыть таймер' }).click()
           const timer = page.getByRole('dialog')
+          assert.equal(await page.evaluate(() => window.testScreenLocks.length), 0)
           await timer.getByRole('button', { name: '▶ Старт' }).click()
+          await page.waitForFunction(() => window.testScreenLocks[0]?.type === 'screen')
+          await page.evaluate(async () => {
+            await window.testScreenLocks[0].release()
+            document.dispatchEvent(new Event('visibilitychange'))
+          })
+          await page.waitForFunction(() => window.testScreenLocks.length === 2)
           await page.clock.fastForward(2000)
           await timer.getByRole('button', { name: 'Пауза', exact: true }).click()
+          await page.waitForFunction(() => window.testScreenLocks[1]?.released)
           const readout = timer.locator('.timer-big')
           const paused = await readout.textContent()
           await page.clock.fastForward(3000)
           assert.equal(await readout.textContent(), paused)
           await timer.getByRole('button', { name: 'Продолжить', exact: true }).click()
+          await page.waitForFunction(() => window.testScreenLocks.length === 3)
           await page.clock.fastForward(2000)
           await page.waitForFunction((previous) => document.querySelector('.timer-big')?.textContent !== previous, paused)
           await timer.getByRole('button', { name: 'Финиш', exact: true }).click()
+          await page.waitForFunction(() => window.testScreenLocks[2]?.released)
           await timer.getByRole('button', { name: 'Готово', exact: true }).click()
           await timer.waitFor({ state: 'detached' })
         } finally { await page.context().close() }

@@ -5,7 +5,7 @@ import { CSS } from '@dnd-kit/utilities'
 import { createCatalogExercise, supabase } from '../supabase'
 import { exactExercise, searchExercises, type Exercise } from '../search'
 import { fmtDay, mondayOf } from '../lib/dates'
-import { COMPLEX_RESULTS, RESULT_TYPES, appendItems, complexName, complexRounds, isComplex, isGroupStart, itemLabels, type ResultType, type Workout, type WorkoutItem } from '../lib/workout'
+import { COMPLEX_RESULTS, MAX_RESULT_ROWS, RESULT_TYPES, appendItems, complexName, complexPerRound, complexRounds, complexTimerRounds, complexTitle, isComplex, isGroupStart, itemLabels, type ResultType, type Workout, type WorkoutItem } from '../lib/workout'
 import { TimerFields } from './TimerFields'
 import { RequestTimeout, withDeadline } from '../lib/request'
 import { PickWorkout } from './WeekTools'
@@ -163,7 +163,12 @@ export function WorkoutEditor({ athleteId, athleteName = '', date = '', workout,
     if (items.some((i) => !i.name.trim())) return setError('У каждого задания должно быть название')
     setBusy(true)
     setError('')
-    const clean = items.map((i, position) => ({ ...i, position, name: i.name.trim() }))
+    const clean = items.map((i, position) => {
+      const complex = isComplex(i)
+      const title = complex ? complexTitle(i.name) : ''
+      const rounds = complex && complexPerRound(i.result_type) ? complexTimerRounds(i.timer) : null
+      return { ...i, position, name: title || rounds != null ? complexName(rounds ?? complexRounds(i.name), title.trim()) : i.name.trim() }
+    })
     try {
       await withDeadline(async (signal) => {
         if (saveOverride) {
@@ -265,7 +270,9 @@ function ItemRow({ item, label, groupStart, inGroup, hasNext, revealDescription,
   const list = () => onChange({ plan_text: item.plan_text.split('\n').map((l) => (l.startsWith('- ') ? l : '- ' + l)).join('\n') })
 
   const complex = isComplex(item)
-  const rounds = complexRounds(item.name) ?? 5
+  const rounds = Math.min(MAX_RESULT_ROWS, complexRounds(item.name) ?? 5)
+  const title = complex ? complexTitle(item.name) : ''
+  const timerRounds = complex && complexPerRound(item.result_type) ? complexTimerRounds(item.timer) : null
 
   return (
     <div ref={setNodeRef} style={{ transform: CSS.Transform.toString(transform), transition }}
@@ -277,7 +284,8 @@ function ItemRow({ item, label, groupStart, inGroup, hasNext, revealDescription,
       <div className="item-head">
         <button className="handle" {...attributes} {...listeners} aria-label="Перетащить">⋮⋮</button>
         <b className="item-label">{label}</b>
-        {complex ? <b className="item-name">Комплекс</b>
+        {complex ? <input className="item-name" aria-label="Название комплекса" placeholder="Название комплекса" value={title}
+          onChange={(e) => onChange({ name: complexName(item.result_type === 'rounds' ? null : rounds, e.target.value) })} />
           : <input className="item-name" value={item.name} onChange={(e) => onChange({ name: e.target.value })} aria-label="Название" />}
         <details className="menu">
           <summary aria-label="Меню задания">⋯</summary>
@@ -297,26 +305,23 @@ function ItemRow({ item, label, groupStart, inGroup, hasNext, revealDescription,
       </div>
       <label>Описание задания
       <textarea ref={plan} className="plan-text" rows={6} placeholder={complex ? 'Что делать: 10 подтягиваний, 15 приседов, 200 м бег' : 'Текст плана'} value={item.plan_text} onChange={(e) => onChange({ plan_text: e.target.value })} /></label>
-      <TimerFields cfg={item.timer} onChange={(timer) => onChange({
-        timer,
-        ...(complex && timer?.kind !== item.timer?.kind && timer?.kind === 'amrap' ? { result_type: 'rounds', name: complexName(null) }
-          : complex && timer?.kind !== item.timer?.kind && timer?.kind === 'fortime' ? { result_type: 'time', name: complexName(rounds) } : {}),
-      })} />
+      <TimerFields cfg={item.timer} onChange={(timer) => onChange({ timer })} />
       <input type="url" inputMode="url" placeholder="Видео: ссылка Rutube / VK / YouTube" value={item.video_url ?? ''}
         onChange={(e) => onChange({ video_url: e.target.value || null })} />
       {complex ? (
         <div className="row">
           <select value={item.result_type} aria-label="Результат комплекса" onChange={(e) => {
             const t = e.target.value as ResultType
-            onChange({ result_type: t, name: complexName(t === 'rounds' ? null : rounds) })  // у АМРАП раундов нет — считают круги
+            onChange({ result_type: t, name: complexName(t === 'rounds' ? null : rounds, title) })
           }}>
             {COMPLEX_RESULTS.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
           </select>
-          {item.result_type !== 'rounds' && (
+          {timerRounds != null && <small className="muted">Раундов для записи: {Math.min(timerRounds, MAX_RESULT_ROWS)}{timerRounds > MAX_RESULT_ROWS && ` из ${timerRounds}`}</small>}
+          {item.result_type !== 'rounds' && timerRounds == null && (
             <div className="stepper">
-              <button type="button" onClick={() => onChange({ name: complexName(Math.max(1, rounds - 1)) })} aria-label="Меньше раундов">−</button>
+              <button type="button" onClick={() => onChange({ name: complexName(Math.max(1, rounds - 1), title) })} aria-label="Меньше раундов">−</button>
               <span>{rounds} р.</span>
-              <button type="button" onClick={() => onChange({ name: complexName(rounds + 1) })} aria-label="Больше раундов">+</button>
+              <button type="button" onClick={() => onChange({ name: complexName(rounds + 1, title) })} disabled={rounds >= MAX_RESULT_ROWS} aria-label="Больше раундов">+</button>
             </div>
           )}
         </div>

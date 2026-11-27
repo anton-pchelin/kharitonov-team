@@ -45,9 +45,10 @@ export function playCue(cue: Cue, s: TimerSettings, ctx: AudioContext | null) {
 }
 
 /** Большой экран таймера. Старт хранится в телефоне — после блокировки или перезапуска время верное. */
-export function Timer({ id, cfg, title, task = '', onClose, onResult }: {
+export function Timer({ id, cfg, title, task = '', onClose, onResult, manualResult = false }: {
   id: string; cfg: TimerCfg; title: string; task?: string; onClose: () => void
   onResult?: (r: { rounds?: number; time_sec?: number; done: boolean }) => void
+  manualResult?: boolean
 }) {
   const key = `timer:${id}`
   const clock = useMemo(() => createTimer(cfg), [cfg])
@@ -66,6 +67,7 @@ export function Timer({ id, cfg, title, task = '', onClose, onResult }: {
   const settings = useMemo(readTimerSettings, [])
   const cues = useMemo(() => clock.cues(settings), [clock, settings])
   const [sheet, setSheet] = useState(false)
+  const [screenMaySleep, setScreenMaySleep] = useState(false)
 
   const save = (s: Saved | null) => {
     setSaved(s)
@@ -76,15 +78,44 @@ export function Timer({ id, cfg, title, task = '', onClose, onResult }: {
 
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 200)
-    let lock: { release: () => Promise<void> } | null = null
-    // экран не гаснет, пока открыт таймер
-    ;(navigator as Navigator & { wakeLock?: { request: (t: 'screen') => Promise<typeof lock> } }).wakeLock?.request('screen')
-      .then((l) => { lock = l }).catch(() => {})
-    return () => { clearInterval(t); lock?.release().catch(() => {}) }
+    return () => clearInterval(t)
   }, [])
 
   const st: TimerState | null = saved ? clock.state((saved.finish ?? saved.pausedAt ?? now) - saved.start) : null
   const done = !!saved?.finish || st?.phase === 'done'
+  const running = !!saved && !saved.pausedAt && !done
+
+  useEffect(() => {
+    if (!running) return
+    let active = true
+    let pending = false
+    let lock: WakeLockSentinel | undefined
+    const acquire = async () => {
+      if (document.visibilityState !== 'visible' || pending || (lock && !lock.released)) return
+      pending = true
+      try {
+        const next = await navigator.wakeLock?.request('screen')
+        if (!active) {
+          await next?.release()
+          return
+        }
+        lock = next
+        setScreenMaySleep(!lock || lock.released)
+        lock?.addEventListener('release', () => {
+          if (active && document.visibilityState === 'visible') setScreenMaySleep(true)
+        }, { once: true })
+      } catch {
+        if (active) setScreenMaySleep(true)
+      } finally { pending = false }
+    }
+    void acquire()
+    document.addEventListener('visibilitychange', acquire)
+    return () => {
+      active = false
+      document.removeEventListener('visibilitychange', acquire)
+      void lock?.release().catch(() => {})
+    }
+  }, [running])
 
   // «3-2-1» перед стартом — короткие писки
   useEffect(() => {
@@ -123,9 +154,10 @@ export function Timer({ id, cfg, title, task = '', onClose, onResult }: {
   }
   const result = () => {
     if (!saved || !st) return
-    onResult?.(cfg.kind === 'amrap' ? { rounds: saved.rounds, done: true }
-      : cfg.kind === 'fortime' ? { time_sec: Math.round(st.elapsed), done: true }
-        : { done: true })
+    if (!manualResult) onResult?.({
+      ...(cfg.kind === 'amrap' ? { rounds: saved.rounds } : {}),
+      time_sec: Math.round(st.elapsed), done: true,
+    })
     save(null)
     onClose()
   }
@@ -136,6 +168,7 @@ export function Timer({ id, cfg, title, task = '', onClose, onResult }: {
         <b>{title} · {timerLabel(cfg)}</b>
         <button className="back" onClick={onClose} aria-label="Закрыть таймер">✕</button>
       </div>
+      {running && screenMaySleep && <small className="muted">Телефон может погасить экран во время таймера</small>}
       <div className={'timer-face ' + (st?.phase ?? '') + (task && settings.view === 'sheet' ? ' large' : '')}>
         {!st && <span className="timer-big">{fmtTime(cfg.kind === 'fortime' ? 0 : clock.state(1000 * prepSeconds(cfg)).left)}</span>}
         {st?.phase === 'countdown' && <span className="timer-big">{st.left}</span>}
@@ -170,7 +203,7 @@ export function Timer({ id, cfg, title, task = '', onClose, onResult }: {
       }}>{saved.pausedAt ? 'Продолжить' : 'Пауза'}</button>}
       {saved && !done && !audio.current && settings.sound !== 'off' && typeof AudioContext !== 'undefined' &&
         <button className="btn secondary" onClick={enableAudio}>Включить звук</button>}
-      {done && <button className="btn timer-btn" onClick={result}>{onResult ? 'Записать в задание' : 'Готово'}</button>}
+      {done && <button className="btn timer-btn" onClick={result}>{manualResult ? 'К результатам' : onResult ? 'Записать в задание' : 'Готово'}</button>}
       {saved && <button className="btn secondary" onClick={() => { if (confirm('Сбросить таймер?')) save(null) }}>Сбросить</button>}
       {task && settings.view === 'sheet' && (sheet
         ? <div className="timer-sheet card"><button className="btn secondary" onClick={() => setSheet(false)}>▼ Скрыть</button><b>Задание</b><Markup text={task} /></div>

@@ -1,4 +1,4 @@
-import type { TimerCfg } from './timer'
+import { blockCount, roundCount, type TimerCfg } from './timer'
 
 export type ResultType = 'weight_reps' | 'reps' | 'weight' | 'time' | 'meters' | 'calories' | 'rounds' | 'check' | 'cardio'
 
@@ -44,18 +44,27 @@ export type Workout = {
   workout_items?: WorkoutItem[]
 }
 
-/** Результат комплекса: на время, АМРАП (круги) или галочка. */
-export const COMPLEX_RESULTS: [ResultType, string][] = [['time', 'На время'], ['rounds', 'АМРАП'], ['check', 'Галочка']]
+export const COMPLEX_RESULTS: [ResultType, string][] = [
+  ['time', 'На время'], ['rounds', 'Круги'], ['reps', 'Повторы по раундам'], ['weight_reps', 'Вес и повторы по раундам'],
+  ['weight', 'Вес по раундам'], ['meters', 'Метры по раундам'], ['calories', 'Калории по раундам'], ['check', 'Галочка'],
+]
+export const MAX_RESULT_ROWS = 100
+export const complexPerRound = (type: ResultType) => type !== 'time' && type !== 'rounds' && type !== 'check' && type !== 'cardio'
+export const complexTimerRounds = (timer?: TimerCfg | null) =>
+  timer && timer.kind !== 'amrap' && timer.kind !== 'fortime'
+    ? roundCount(timer) * (timer.kind === 'intervals' ? 1 : blockCount(timer))
+    : null
 
-// shortcut: комплекс — задание с названием «Комплекс · N раундов» без упражнения, отдельного столбца в базе нет;
+// shortcut: тип, раунды и подпись комплекса хранятся в названии задания без упражнения;
 // если понадобится больше свойств комплекса — завести столбец миграцией
 export const isComplex = (i: { name: string; exercise_id: string | null }) => !i.exercise_id && /^Комплекс( ·|$)/.test(i.name)
-export const complexRounds = (name: string) => Number(name.match(/· (\d+)/)?.[1]) || null
-export function complexName(rounds: number | null) {
-  if (!rounds) return 'Комплекс'
+export const complexRounds = (name: string) => Number(name.match(/^Комплекс · (\d+) раунд/)?.[1]) || null
+export const complexTitle = (name: string) => name.match(/^Комплекс · (?:\d+ раунд(?:а|ов)?|АМРАП) · (.*)$/)?.[1] ?? ''
+export function complexName(rounds: number | null, title = '') {
+  if (!rounds) return title ? `Комплекс · АМРАП · ${title}` : 'Комплекс'
   const n10 = rounds % 10, n100 = rounds % 100
   const word = n10 === 1 && n100 !== 11 ? 'раунд' : n10 >= 2 && n10 <= 4 && (n100 < 12 || n100 > 14) ? 'раунда' : 'раундов'
-  return `Комплекс · ${rounds} ${word}`
+  return `Комплекс · ${rounds} ${word}${title ? ` · ${title}` : ''}`
 }
 
 const LETTERS = 'АБВГДЕЖЗИК'
